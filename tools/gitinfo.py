@@ -3,6 +3,7 @@
 
 """Firmware version information, derived from the git checkout."""
 
+import os
 import re
 import subprocess
 import sys
@@ -29,13 +30,17 @@ def get_git_revision():
     # One process for both: the version rule runs on every build.
     timestamp, commit = _git("log", "-1", "--format=%ct%n%h", "HEAD").split("\n")
 
-    try:
-        tag = _git("describe")
-        if _is_dirty():
-            tag += "-dirty"
-    except subprocess.CalledProcessError:
-        tag = "v9.9.9-dev"
-        print(f"Git tag not found, using {tag}", file=sys.stderr)
+    tag = os.environ.get("PBL_VERSION_TAG")
+    if tag:
+        print(f"Using version tag {tag} from PBL_VERSION_TAG", file=sys.stderr)
+    else:
+        try:
+            tag = _git("describe")
+            if _is_dirty():
+                tag += "-dirty"
+        except subprocess.CalledProcessError:
+            tag = "v9.9.9-dev"
+            print(f"Git tag not found, using {tag}", file=sys.stderr)
 
     # The tag must follow the documented form. See
     # https://github.com/pebble/tintin/wiki/Firmware,-PRF-&-Bootloader-Versions
