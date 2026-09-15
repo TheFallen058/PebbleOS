@@ -29,5 +29,11 @@
         *(.conststring)
         *(i.*)
 
+        /* hal_sifli and libxs emit these. Placed here because as orphan
+         * sections the linker would append them after .fw_version, which must
+         * stay last in FLASH. */
+        *(.flash)
+        *(.flash*)
+
         . = ALIGN(8);
     } >FLASH
