@@ -128,13 +128,15 @@ typedef enum {
   ActivityMetricDistanceMeters,
   ActivityMetricSleepTotalSeconds,
   ActivityMetricSleepRestfulSeconds,
-  ActivityMetricSleepEnterAtSeconds, // What time the user fell asleep. Measured in
-                                     // seconds after midnight.
-  ActivityMetricSleepExitAtSeconds,  // What time the user woke up. Measured in
-                                     // seconds after midnight
-  ActivityMetricSleepState,          // returns an ActivitySleepState enum value
-  ActivityMetricSleepStateSeconds,   // how many seconds we've been in the
-                                     // ActivityMetricSleepState state
+  ActivityMetricSleepEnterAtSeconds,               // What time the user fell asleep. Measured in
+                                                   // seconds after midnight.
+  ActivityMetricSleepExitAtSeconds,                // What time the user woke up. Measured in
+                                                   // seconds after midnight
+  ActivityMetricSleepAwakeSeconds,                 // Time spent awake during interruptions
+  ActivityMetricSleepNapSeconds,                   // Subset of SleepTotalSeconds spent in naps
+  ActivityMetricSleepState,                        // returns an ActivitySleepState enum value
+  ActivityMetricSleepStateSeconds,                 // how many seconds we've been in the
+                                                   // ActivityMetricSleepState state
   ActivityMetricLastVMC,
 
   ActivityMetricHeartRateRawBPM,                 // Most recent heart rate reading
