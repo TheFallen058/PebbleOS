@@ -5,6 +5,7 @@
 #include "option_menu.h"
 #include "window.h"
 
+#include "applib/ui/number_window.h"
 #include "applib/ui/option_menu_window.h"
 #include "kernel/pbl_malloc.h"
 #include "process_state/app_state/app_state.h"
@@ -14,9 +15,38 @@
 #include "system/passert.h"
 #include "pbl/util/size.h"
 
+#include <inttypes.h>
+#include <stdio.h>
+
 typedef struct SettingsHealthData {
   SettingsCallbacks callbacks;
+  char weight_subtitle_buffer[16];
 } SettingsHealthData;
+
+static bool prv_uses_imperial_units(void) {
+  return shell_prefs_get_units_distance() == UnitsDistance_Miles;
+}
+
+static int32_t prv_weight_display_value(uint16_t weight_dag) {
+  if (prv_uses_imperial_units()) {
+    return (int32_t)((weight_dag / 45.359f) + 0.5f);
+  }
+  return (int32_t)(weight_dag / 100);
+}
+
+static uint16_t prv_weight_dag_from_display(int32_t display_value) {
+  if (prv_uses_imperial_units()) {
+    return (uint16_t)(display_value * 45.359f);
+  }
+  return (uint16_t)(display_value * 100);
+}
+
+static void prv_format_weight_subtitle(SettingsHealthData *data) {
+  const int32_t display_value = prv_weight_display_value(activity_prefs_get_weight_dag());
+  const char *unit = prv_uses_imperial_units() ? "lb" : "kg";
+  snprintf(data->weight_subtitle_buffer, sizeof(data->weight_subtitle_buffer),
+           "%" PRId32 " %s", display_value, unit);
+}
 
 static const char *s_units_distance_labels[] = {
   i18n_noop("Kilometers"),
@@ -35,6 +65,7 @@ static const char *s_hrm_interval_labels[] = {
 enum SettingsHealthItem {
   SettingsHealthTrackingEnabled,
   SettingsHealthUnitDistance,
+  SettingsHealthWeight,
 #ifdef CONFIG_HRM
   SettingsHealthHRMonitoringInterval,
   SettingsHealthHRActivityTracking,
@@ -44,6 +75,39 @@ enum SettingsHealthItem {
 #endif
   NumSettingsHealthItems
 };
+
+static void prv_weight_selected(NumberWindow *number_window, void *context);
+
+static void prv_weight_menu_push(SettingsHealthData *data) {
+  const int32_t min_val = prv_uses_imperial_units() ? 66 : 30;
+  const int32_t max_val = prv_uses_imperial_units() ? 441 : 200;
+  const char *title = i18n_noop("Weight");
+
+  NumberWindow *number_window = number_window_create(
+      i18n_get(title, data),
+      (NumberWindowCallbacks) {
+        .selected = prv_weight_selected,
+      },
+      data);
+
+  if (!number_window) {
+    return;
+  }
+
+  number_window_set_min(number_window, min_val);
+  number_window_set_max(number_window, max_val);
+  number_window_set_step_size(number_window, 1);
+  number_window_set_value(number_window, prv_weight_display_value(activity_prefs_get_weight_dag()));
+  app_window_stack_push(&number_window->window, true /* animated */);
+}
+
+static void prv_weight_selected(NumberWindow *number_window, void *context) {
+  const int32_t display_value = number_window_get_value(number_window);
+  activity_prefs_set_weight_dag(prv_weight_dag_from_display(display_value));
+  app_window_stack_remove(&number_window->window, true /* animated */);
+  settings_menu_reload_data(SettingsMenuItemHealth);
+  settings_menu_mark_dirty(SettingsMenuItemHealth);
+}
 
 #ifdef CONFIG_HRM
 // HRM Interval option menu
@@ -118,6 +182,12 @@ static void prv_draw_row_cb(SettingsCallbacks *context, GContext *ctx, const Lay
       }
       break;
     }
+    case SettingsHealthWeight: {
+      title = i18n_noop("Weight");
+      prv_format_weight_subtitle(data);
+      subtitle = data->weight_subtitle_buffer;
+      break;
+    }
 #ifdef CONFIG_HRM
     case SettingsHealthHRMonitoringInterval: {
       title = i18n_noop("HR Monitoring");
@@ -186,6 +256,9 @@ static void prv_select_click_cb(SettingsCallbacks *context, uint16_t row) {
       shell_prefs_set_units_distance(unit);
       break;
     }
+    case SettingsHealthWeight:
+      prv_weight_menu_push((SettingsHealthData *)context);
+      break;
 #ifdef CONFIG_HRM
     case SettingsHealthHRMonitoringInterval:
       prv_hrm_interval_menu_push((SettingsHealthData *)context);
