@@ -18,6 +18,7 @@
 #include "pbl/kernel/compiler.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define ACTIVITY_LOG_DEBUG(fmt, args...) PBL_LOG_D_DBG(LOG_DOMAIN_ACTIVITY, fmt, ##args)
@@ -117,6 +118,10 @@ typedef uint32_t ActivityScalarStore;
 // Settings file info and keys
 #define ACTIVITY_SETTINGS_FILE_NAME "activity"
 #define ACTIVITY_SETTINGS_FILE_LEN  0x4000
+#define ACTIVITY_WEIGHT_HISTORY_DAYS 30
+#define ACTIVITY_WEIGHT_RECENT_MAX 90
+#define ACTIVITY_WEIGHT_MIN_DAG 3000
+#define ACTIVITY_WEIGHT_MAX_DAG 20000
 
 // The version of our settings file
 // Version 1 - ActivitySettingsKeyVersion didn't exist
@@ -130,6 +135,11 @@ typedef struct {
   // One entry per day. The most recent day (today) is stored at index 0
   ActivityScalarStore values[ACTIVITY_HISTORY_DAYS];
 } ActivitySettingsValueHistory;
+
+typedef struct PBL_PACKED {
+  uint32_t utc_sec;
+  uint16_t weight_dag;
+} ActivityWeightSample;
 
 // Keys of the settings we save in our settings file.
 typedef enum {
@@ -195,6 +205,7 @@ typedef enum {
   ActivitySettingsKeyHeartRateZone3Minutes,
   ActivitySettingsKeySleepAwakeMinutesHistory,    // ActivitySettingsValueHistory
   ActivitySettingsKeySleepNapMinutesHistory,      // ActivitySettingsValueHistory
+  ActivitySettingsKeyWeightDailyHistory,          // ActivitySettingsValueHistory
 } ActivitySettingsKey;
 
 // -----------------------------------------------------------------------------------------
@@ -516,6 +527,13 @@ void activity_private_settings_close(SettingsFile *file);
 bool activity_test_reset(bool reset_settings, bool tracking_on,
                          const ActivitySettingsValueHistory *sleep_history,
                          const ActivitySettingsValueHistory *step_history);
+
+bool activity_weight_history_add(time_t utc_sec, uint16_t weight_dag);
+bool activity_weight_history_seed_profile_if_empty(time_t utc_sec, uint16_t weight_dag);
+bool activity_weight_history_remove_latest(time_t utc_sec, uint16_t *new_weight_dag);
+size_t activity_weight_history_get_recent(ActivityWeightSample *samples, size_t max_samples);
+bool activity_weight_history_get_daily(time_t utc_sec, ActivitySettingsValueHistory *history);
+void activity_weight_history_clear(void);
 
 // --------------------------------------------------------------------------------
 // Activity Sessions
