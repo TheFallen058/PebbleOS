@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2024 Google LLC */
 /* SPDX-License-Identifier: Apache-2.0 */
 
-#include <bluetooth/bt_driver_comm.h>
+#include <pbl/bluetooth/comm.h>
 
 #include "comm/bt_lock.h"
 
@@ -80,13 +80,14 @@ static void prv_reset(Transport *transport) {
 }
 
 static void prv_granted_kernel_main_cb(void *ctx) {
-  ResponsivenessGrantedHandler granted_handler = ctx;
+  pbl_bt_responsiveness_granted_cb_t granted_handler = ctx;
   granted_handler();
 }
 
-static void prv_set_connection_responsiveness(Transport *transport, BtConsumer consumer,
-                                              ResponseTimeState state, uint16_t max_period_secs,
-                                              ResponsivenessGrantedHandler granted_handler) {
+static void prv_set_connection_responsiveness(Transport *transport, enum pbl_bt_consumer consumer,
+                                              enum pbl_bt_response_time_state state,
+                                              uint16_t max_period_secs,
+                                              pbl_bt_responsiveness_granted_cb_t granted_handler) {
   if (granted_handler) {
     launcher_task_add_callback(prv_granted_kernel_main_cb, granted_handler);
   }
@@ -98,7 +99,7 @@ static CommSessionTransportType prv_get_type(struct Transport *transport) {
 
 static void prv_send_job(void *data) {
   CommSession *session = (CommSession *)data;
-  bt_driver_run_send_next_job(session, true);
+  pbl_bt_run_send_next_job(session, true);
 }
 
 static bool prv_schedule_send_next_job(CommSession *session) {
@@ -156,7 +157,7 @@ void pulse_transport_set_connected(bool is_connected) {
 
   if (send_event) {
     PebbleEvent e = {
-      .type = PEBBLE_BT_CONNECTION_EVENT,
+      .type = PBL_BT_PEBBLE_CONNECTION_EVENT,
       .bluetooth = {
         .connection = {
           .state = (s_transport.session) ? PebbleBluetoothConnectionEventStateConnected

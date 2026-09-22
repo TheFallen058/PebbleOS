@@ -48,6 +48,7 @@ extern void command_assert_fail(void);
 extern void command_stuck_timer(void);
 
 extern void command_croak(void);
+extern void command_wdt_stall(const char *thread);
 extern void command_hardfault(void);
 
 extern void command_dump_malloc_kernel(void);
@@ -490,6 +491,7 @@ static const Command s_prompt_commands[] = {
   { "hard fault", command_hardfault, 0 },
   */
   {"croak", command_croak, 0},
+  {"wdt stall", command_wdt_stall, 1},
 
 #ifdef CONFIG_MALLOC_INSTRUMENTATION
   {"dump malloc kernel", command_dump_malloc_kernel, 0},
@@ -600,9 +602,7 @@ static const Command s_prompt_commands[] = {
   {"profiler stats", command_profiler_stats, 0},
 #endif
 
-#if (LOG_DOMAIN_BT_PAIRING_INFO != 0)
-  // Note to future codespace saver ... this is on by default for debug builds
-  // Removing it will save ~2400 bytes but it is super useful for BT bringup debug!
+#ifndef CONFIG_RELEASE
   {"gapdb dump", command_gapdb_dump, 0},
   {"sprf nuke", command_bt_sprf_nuke, 0},
 #if !defined(CONFIG_RECOVERY_FW)

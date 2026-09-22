@@ -12,9 +12,10 @@
 #include "dbgserial.h"
 #include "debug/flash_logging.h"
 #include <pbl/drivers/flash.h>
-#include <pbl/drivers/task_watchdog.h>
+#include <pbl/task_wdt/task_wdt.h>
 #include "flash_region/flash_region.h"
 #include "kernel/event_loop.h"
+#include "pbl/kernel/irq.h"
 #include "logging/logging_private.h"
 #include "kernel/pbl_malloc.h"
 #include "kernel/pebble_tasks.h"
@@ -40,8 +41,8 @@
 
 #include <cmsis_core.h>
 
-#include <bluetooth/responsiveness.h>
-#include <bluetooth/gatt_discovery.h>
+#include <pbl/bluetooth/responsiveness.h>
+#include <pbl/bluetooth/gatt_discovery.h>
 
 #include <inttypes.h>
 #include <stdint.h>
@@ -362,7 +363,7 @@ void command_flash_show_erased_sectors(const char *arg) {
       }
     }
     addr += SECTOR_SIZE_BYTES;
-    task_watchdog_bit_set(pebble_task_get_current());
+    pbl_task_wdt_feed_self();
   }
 }
 
@@ -604,7 +605,7 @@ static void s_flash_benchmark(size_t sz) {
   free(buf);
 
   /* this could take a while -- don't crash! */
-  task_watchdog_bit_set(pebble_task_get_current());
+  pbl_task_wdt_feed_self();
 }
 
 void command_flash_benchmark() {
@@ -686,6 +687,32 @@ void command_croak(void) {
   prompt_command_finish();
 
   PBL_CROAK("You asked for this!");
+}
+
+static void prv_stall(void *data) {
+  PBL_LOG_WRN("Stalling %s", pebble_task_get_name(pebble_task_get_current()));
+  for (;;) {
+  }
+}
+
+//! Spins a system thread forever so the task watchdog can be exercised.
+void command_wdt_stall(const char *thread) {
+  if (strcmp(thread, "main") == 0) {
+    launcher_task_add_callback(prv_stall, NULL);
+  } else if (strcmp(thread, "timers") == 0) {
+    new_timer_start(new_timer_create(), 10, prv_stall, NULL, 0);
+  } else if (strcmp(thread, "bg") == 0) {
+    prompt_command_finish();
+    prv_stall(NULL);
+  } else if (strcmp(thread, "irq") == 0) {
+    // Nothing can run, not even the watchdog thread: the hardware watchdog
+    // has to reset us.
+    prompt_command_finish();
+    pbl_irq_lock();
+    prv_stall(NULL);
+  } else {
+    prompt_send_response("main | bg | timers | irq");
+  }
 }
 
 typedef void (*KaboomCallback)(void);
@@ -907,7 +934,6 @@ void command_log_dump_spam(void) {
 
 #ifdef TEST_FLASH_LOCK_PROTECTION
 #include "flash_region/flash_region.h"
-#include <pbl/drivers/task_watchdog.h>
 #include <pbl/drivers/watchdog.h>
 
 // This test attempts to write over every region of the flash.
@@ -940,7 +966,7 @@ void command_flash_test_locked_sectors(void) {
     }
   }
 
-  task_watchdog_bit_set(pebble_task_get_current());
+  pbl_task_wdt_feed_self();
   __enable_irq();
 }
 #endif
@@ -1048,7 +1074,7 @@ void command_litter_filesystem(const char *s_number, const char *s_size) {
       PBL_LOG_DBG("Closed %s", name);
     }
 
-    task_watchdog_bit_set(pebble_task_get_current());
+    pbl_task_wdt_feed_self();
   }
 }
 #endif
@@ -1060,8 +1086,8 @@ static GAPLEConnection *prv_get_le_connection_and_print_info(void) {
     prompt_send_response("No device connected");
   } else {
     char buf[80];
-    prompt_send_response_fmt(buf, sizeof(buf), "Connected to " BT_DEVICE_ADDRESS_FMT,
-                             BT_DEVICE_ADDRESS_XPLODE(conn->device.address));
+    prompt_send_response_fmt(buf, sizeof(buf), "Connected to " PBL_BT_ADDR_FMT,
+                             PBL_BT_ADDR_XPLODE(conn->device.address));
   }
 
   return conn;
@@ -1069,7 +1095,7 @@ static GAPLEConnection *prv_get_le_connection_and_print_info(void) {
 
 void command_bt_conn_param_set(char *interval_min_1_25ms, char *interval_max_1_25ms,
                                char *slave_latency_events, char *timeout_10ms) {
-  BleConnectionParamsUpdateReq req = {
+  struct pbl_bt_conn_params_update_req req = {
     .interval_min_1_25ms = atoi(interval_min_1_25ms),
     .interval_max_1_25ms = atoi(interval_max_1_25ms),
     .slave_latency_events = atoi(slave_latency_events),
@@ -1077,20 +1103,20 @@ void command_bt_conn_param_set(char *interval_min_1_25ms, char *interval_max_1_2
   };
 
   GAPLEConnection *conn = prv_get_le_connection_and_print_info();
-  BTDeviceInternal addr = {};
+  struct pbl_bt_device_internal addr = {};
   if (conn) {
     addr.address = conn->device.address;
   }
 
-  bt_driver_le_connection_parameter_update(&addr, &req);
+  pbl_bt_le_connection_parameter_update(&addr, &req);
 }
 // Not in a header because it's really only used from within the gatt_service_changed module
 extern void gatt_client_discovery_discover_range(GAPLEConnection *connection,
-                                                 ATTHandleRange *hdl_range);
+                                                 struct pbl_bt_att_handle_range *hdl_range);
 void command_bt_disc_start(char *start_handle, char *end_handle) {
   bt_lock();
   {
-    ATTHandleRange range = {.start = atoi(start_handle), .end = atoi(end_handle)};
+    struct pbl_bt_att_handle_range range = {.start = atoi(start_handle), .end = atoi(end_handle)};
 
     GAPLEConnection *conn = prv_get_le_connection_and_print_info();
     if (conn) {
@@ -1105,7 +1131,7 @@ void command_bt_disc_stop(void) {
   {
     GAPLEConnection *conn = prv_get_le_connection_and_print_info();
     if (conn) {
-      bt_driver_gatt_stop_discovery(conn);
+      pbl_bt_gatt_stop_discovery(conn);
     }
   }
   bt_unlock();
@@ -1136,8 +1162,6 @@ void command_ble_logging_get_level(void) {
 }
 
 #ifdef CONFIG_PERFORMANCE_TESTS
-// for task_watchdog_bit_set_all
-#include <pbl/drivers/task_watchdog.h>
 // For taskYIELD()
 
 // Average this many iterations of the text test for getting useful perf numbers.
@@ -1410,7 +1434,7 @@ static void prv_perftest_test_main(void *data) {
   for (int i = 0; i < PERFTEST_TEXT_ITERATIONS; i++) {
     // Sometimes this loop takes long enough that we end up watchdogging
     watchdog_feed();
-    task_watchdog_bit_set_all();
+    pbl_task_wdt_feed_all();
 
     GContext *ctx = prv_perftest_get_context();
     graphics_context_set_text_color(ctx, GColorBlack);
@@ -1439,7 +1463,7 @@ void command_perftest_text(const char *string_type, const char *fontkey, const c
   while (s_perftest_text_arguments.string_type != NULL) {
     taskYIELD();
     watchdog_feed();
-    task_watchdog_bit_set_all();
+    pbl_task_wdt_feed_all();
   }
 }
 

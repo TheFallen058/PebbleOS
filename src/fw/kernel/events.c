@@ -16,6 +16,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "pbl/kernel/compiler.h"
 
 #define MAX_KERNEL_EVENTS           32
 #define MAX_FROM_APP_EVENTS         10
@@ -166,11 +167,6 @@ static bool prv_event_put_isr(struct pbl_msgq *queue, const char *queue_type, ui
   if (pbl_msgq_put(queue, event, PBL_NO_WAIT) != 0) {
     prv_log_event_put_failure(queue_type, saved_lr, event);
 
-#ifdef CONFIG_NO_WATCHDOG
-    while (1)
-      ;
-#endif
-
     reset_due_to_software_failure();
   }
 
@@ -224,7 +220,7 @@ void event_deinit(PebbleEvent *event) {
 
 void event_put(PebbleEvent *event) {
   // Caller LR; more reliable than reading lr register from a deeper helper.
-  uintptr_t saved_lr = (uintptr_t)__builtin_return_address(0);
+  uintptr_t saved_lr = (uintptr_t)PBL_RETURN_ADDRESS(0);
   // If we are posting from the KernelMain task, use the dedicated s_from_kernel_event_queue queue
   // for that See comments above where s_from_kernel_event_queue is declared.
   if (pebble_task_get_current() == PebbleTask_KernelMain) {
@@ -235,13 +231,13 @@ void event_put(PebbleEvent *event) {
 }
 
 bool event_put_isr(PebbleEvent *event) {
-  uintptr_t saved_lr = (uintptr_t)__builtin_return_address(0);
+  uintptr_t saved_lr = (uintptr_t)PBL_RETURN_ADDRESS(0);
 
   return prv_event_put_isr(&s_kernel_event_queue, "kernel", saved_lr, event);
 }
 
 void event_put_from_process(PebbleTask task, PebbleEvent *event) {
-  uintptr_t saved_lr = (uintptr_t)__builtin_return_address(0);
+  uintptr_t saved_lr = (uintptr_t)PBL_RETURN_ADDRESS(0);
 
   struct pbl_msgq *queue = event_get_to_kernel_queue(task);
   prv_event_put(queue, "from app", saved_lr, event);
@@ -323,7 +319,7 @@ void **event_get_buffer(PebbleEvent *event) {
     case PEBBLE_BLOBDB_EVENT:
       return (void **)&event->blob_db.key;
 
-    case PEBBLE_BT_PAIRING_EVENT:
+    case PBL_BT_PEBBLE_PAIRING_EVENT:
       if (event->bluetooth.pair.type == PebbleBluetoothPairEventTypePairingUserConfirmation) {
         return (void **)&event->bluetooth.pair.confirmation_info;
       }

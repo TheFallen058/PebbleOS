@@ -11,7 +11,7 @@
 #include "pbl/kernel/compiler.h"
 #include "util/net.h"
 
-#include <bluetooth/conn_event_stats.h>
+#include <pbl/bluetooth/conn_event_stats.h>
 
 #include "pbl/kernel/sem.h"
 
@@ -38,7 +38,7 @@
 #include "stubs_pfs.h"
 #include "stubs_prompt.h"
 #include "stubs_serial.h"
-#include "stubs_task_watchdog.h"
+#include "stubs_task_wdt.h"
 #include "stubs_tick.h"
 
 extern struct pbl_sem *put_bytes_get_semaphore(void);
@@ -77,12 +77,12 @@ void app_storage_get_file_name(char *name, size_t buf_length, AppInstallId app_i
   strcpy(name, "t");
 }
 
-void bluetooth_analytics_handle_put_bytes_stats(bool successful, uint8_t type, uint32_t total_size,
-                                                uint32_t elapsed_time_ms,
-                                                const SlaveConnEventStats *orig_stats) {
+void bluetooth_analytics_handle_put_bytes_stats(
+    bool successful, uint8_t type, uint32_t total_size, uint32_t elapsed_time_ms,
+    const struct pbl_bt_slave_conn_event_stats *orig_stats) {
 }
 
-bool bt_driver_analytics_get_conn_event_stats(SlaveConnEventStats *stats) {
+bool pbl_bt_analytics_get_conn_event_stats(struct pbl_bt_slave_conn_event_stats *stats) {
   return false;
 }
 
@@ -857,6 +857,27 @@ void test_put_bytes__install_message_cookie_mismatch(void) {
   prv_receive_install(~s_last_response_cookie);
   assert_ack_count(0);
   assert_nack_count(1);
+}
+
+// The phone matches a response to the request it sent, and the commit that precedes an install has
+// already cleaned the transfer state up, so the install's own token is the only one left to answer
+// with.
+void test_put_bytes__install_ack_carries_the_install_token(void) {
+  prv_receive_init_put_and_commit_fw_object();
+  const uint32_t install_token = s_last_response_cookie;
+
+  prv_receive_install(install_token);
+  assert_ack_count(1);
+  cl_assert_equal_i(s_last_response_cookie, install_token);
+}
+
+void test_put_bytes__install_nack_carries_the_install_token(void) {
+  prv_receive_init_put_and_commit_fw_object();
+  const uint32_t unknown_token = ~s_last_response_cookie;
+
+  prv_receive_install(unknown_token);
+  assert_nack_count(1);
+  cl_assert_equal_i(s_last_response_cookie, unknown_token);
 }
 
 void test_put_bytes__install_message_prf_boot_bit_set(void) {

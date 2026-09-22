@@ -7,6 +7,7 @@
 #include "util/net.h"
 
 #include <string.h>
+#include "pbl/kernel/compiler.h"
 
 // -----------------------------------------------------------------------------
 //! Apple's iBeacon AD DATA format.
@@ -17,7 +18,7 @@ static const uint16_t COMPANY_ID_APPLE = 0x004c;
 static const uint8_t APPLE_TYPE_IBEACON = 0x02;
 static const uint8_t APPLE_IBEACON_LENGTH = 0x15;
 
-typedef struct __attribute__((__packed__)) {
+typedef struct PBL_PACKED {
   //! @see APPLE_AD_TYPE_IBEACON
   uint8_t type;
 
@@ -57,7 +58,7 @@ uint16_t ble_ibeacon_get_distance_cm(const BLEiBeacon *ibeacon) {
   return ibeacon->distance_cm;
 }
 
-BLEiBeacon *ble_ibeacon_create_from_ad_data(const BLEAdData *ad, int8_t rssi) {
+BLEiBeacon *ble_ibeacon_create_from_ad_data(const struct pbl_bt_ad_data *ad, int8_t rssi) {
   // Note, not yet exported to 3rd party apps so no padding necessary
   BLEiBeacon *ibeacon = applib_malloc(sizeof(BLEiBeacon));
   if (ibeacon && !ble_ibeacon_parse(ad, rssi, ibeacon)) {
@@ -81,7 +82,7 @@ static uint16_t calculate_distance_cm(int8_t tx_power, int8_t rssi) {
 
 // -----------------------------------------------------------------------------
 //! iBeacon Advertisement Data parser
-bool ble_ibeacon_parse(const BLEAdData *ad, int8_t rssi, BLEiBeacon *ibeacon_out) {
+bool ble_ibeacon_parse(const struct pbl_bt_ad_data *ad, int8_t rssi, BLEiBeacon *ibeacon_out) {
   uint16_t company_id = 0;
   AdDataManufacturerSpecificAppleiBeacon raw_ibeacon;
   const size_t size_copied = ble_ad_copy_manufacturer_specific_data(
@@ -108,7 +109,7 @@ bool ble_ibeacon_parse(const BLEAdData *ad, int8_t rssi, BLEiBeacon *ibeacon_out
 
 // -----------------------------------------------------------------------------
 //! iBeacon Advertisement Data composer
-bool ble_ibeacon_compose(const BLEiBeacon *ibeacon_in, BLEAdData *ad_out) {
+bool ble_ibeacon_compose(const BLEiBeacon *ibeacon_in, struct pbl_bt_ad_data *ad_out) {
   AdDataManufacturerSpecificAppleiBeacon raw_ibeacon = {
     .type = APPLE_TYPE_IBEACON,
     .length = APPLE_IBEACON_LENGTH,

@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2024 Google LLC */
 /* SPDX-License-Identifier: Apache-2.0 */
 
-#include <bluetooth/bt_driver_comm.h>
+#include <pbl/bluetooth/comm.h>
 
 #include "pbl/services/comm_session/session.h"
 #include "pbl/services/comm_session/session_analytics.h"
@@ -262,14 +262,16 @@ void comm_session_close(CommSession *session, CommSessionCloseReason reason) {
   kernel_free(session);
 }
 
-void comm_session_set_responsiveness(CommSession *session, BtConsumer consumer,
-                                     ResponseTimeState state, uint16_t max_period_secs) {
+void comm_session_set_responsiveness(CommSession *session, enum pbl_bt_consumer consumer,
+                                     enum pbl_bt_response_time_state state,
+                                     uint16_t max_period_secs) {
   comm_session_set_responsiveness_ext(session, consumer, state, max_period_secs, NULL);
 }
 
-void comm_session_set_responsiveness_ext(CommSession *session, BtConsumer consumer,
-                                         ResponseTimeState state, uint16_t max_period_secs,
-                                         ResponsivenessGrantedHandler granted_handler) {
+void comm_session_set_responsiveness_ext(CommSession *session, enum pbl_bt_consumer consumer,
+                                         enum pbl_bt_response_time_state state,
+                                         uint16_t max_period_secs,
+                                         pbl_bt_responsiveness_granted_cb_t granted_handler) {
   if (session) {
     bt_lock();
     if (comm_session_is_valid(session)) {
@@ -286,7 +288,7 @@ bool comm_session_is_current_task_send_next_task(CommSession *session) {
   if (session->transport_imp->schedule) {
     return session->transport_imp->is_current_task_schedule_task(session->transport);
   }
-  return bt_driver_comm_is_current_task_send_next_task();
+  return pbl_bt_comm_is_current_task_send_next_task();
 }
 
 void prv_send_next(CommSession *session, bool is_callback) {
@@ -312,7 +314,7 @@ unlock:
   bt_unlock();
 }
 
-void bt_driver_run_send_next_job(CommSession *session, bool is_callback) {
+void pbl_bt_run_send_next_job(CommSession *session, bool is_callback) {
   prv_send_next(session, is_callback);
 }
 
@@ -324,7 +326,7 @@ void comm_session_send_next(CommSession *session) {
 
   TransportSchedule schedule_func = session->transport_imp->schedule;
   if (!schedule_func) {
-    schedule_func = bt_driver_comm_schedule_send_next_job;
+    schedule_func = pbl_bt_comm_schedule_send_next_job;
   }
 
   if (schedule_func(session)) {
@@ -548,11 +550,12 @@ DEFINE_SYSCALL(void, sys_app_comm_set_responsiveness, SniffInterval interval) {
   CommSession *comm_session = comm_session_get_current_app_session();
   switch (interval) {
     case SNIFF_INTERVAL_REDUCED:
-      comm_session_set_responsiveness(comm_session, BtConsumerApp, ResponseTimeMiddle,
-                                      MAX_PERIOD_RUN_FOREVER);
+      comm_session_set_responsiveness(comm_session, PBL_BT_CONSUMER_APP,
+                                      PBL_BT_RESPONSE_TIME_MIDDLE, MAX_PERIOD_RUN_FOREVER);
       return;
     case SNIFF_INTERVAL_NORMAL:
-      comm_session_set_responsiveness(comm_session, BtConsumerApp, ResponseTimeMax, 0);
+      comm_session_set_responsiveness(comm_session, PBL_BT_CONSUMER_APP, PBL_BT_RESPONSE_TIME_MAX,
+                                      0);
       return;
   }
   PBL_LOG_WRN("Invalid sniff interval");

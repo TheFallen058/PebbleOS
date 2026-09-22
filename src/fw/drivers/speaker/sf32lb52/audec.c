@@ -9,6 +9,8 @@
 #include "pbl/util/misc.h"
 #include "pbl/services/system_task.h"
 #include "pbl/soc/sf32lb/sleep.h"
+#include <pbl/kernel/irq.h>
+#include <pbl/kernel/sched.h>
 
 PBL_LOG_MODULE_DEFINE(driver_speaker_sf32lb, CONFIG_DRIVER_SPEAKER_LOG_LEVEL);
 
@@ -19,6 +21,8 @@ PBL_LOG_MODULE_DEFINE(driver_speaker_sf32lb, CONFIG_DRIVER_SPEAKER_LOG_LEVEL);
 #else
 #define SINC_GAIN 0x14D
 #endif
+
+#define PLAYBACK_RESYNC_SAMPLES (AUDIO_PLAYBACK_SAMPLE_RATE * 8 / 1000)
 
 #define MIN_VOLUME 0
 #define MAX_VOLUME 100
@@ -328,6 +332,14 @@ void audec_start(AudioDevice *audio_device, AudioTransCB cb) {
   AUDCODEC_HandleTypeDef *haudcodec = &state->audcodec;
   state->trans_cb = cb;
   state->callback_pending = false;
+  state->playback_started = false;
+#ifdef CONFIG_SPEAKER_SF32LB_DIAGNOSTICS
+  state->diagnostic_refills = 0;
+  state->diagnostic_underrun_bytes = 0;
+  state->diagnostic_write_drops = 0;
+  state->diagnostic_signal_samples = 0;
+  state->diagnostic_peak = 0;
+#endif
 
   soc_sf32lb_sleep_block(SOC_SF32LB_DEEPWFI);
 
@@ -366,12 +378,18 @@ void audec_start(AudioDevice *audio_device, AudioTransCB cb) {
 uint32_t audec_write(AudioDevice *audio_device, void *writeBuf, uint32_t size) {
   AudioDeviceState *state = audio_device->state;
   if (state->circ_buffer_storage) {
+    pbl_irq_lock();
     uint32_t free_size = circular_buffer_get_write_space_remaining(&state->circ_buffer);
     uint16_t to_write = (size > free_size) ? (uint16_t)free_size : (uint16_t)size;
+#ifdef CONFIG_SPEAKER_SF32LB_DIAGNOSTICS
+    state->diagnostic_write_drops += size - to_write;
+#endif
     if (to_write > 0) {
       circular_buffer_write(&state->circ_buffer, writeBuf, to_write);
     }
-    return circular_buffer_get_write_space_remaining(&state->circ_buffer);
+    free_size = circular_buffer_get_write_space_remaining(&state->circ_buffer);
+    pbl_irq_unlock();
+    return free_size;
   }
 
   return 0;
@@ -394,6 +412,7 @@ void audec_stop(AudioDevice *audio_device) {
   prv_bf0_disable_pll(state);
 
   HAL_NVIC_DisableIRQ(audio_device->audec_dma_irq);
+  state->trans_cb = NULL;
   HAL_AUDCODEC_DMAStop(haudcodec, HAL_AUDCODEC_DAC_CH0);
   haudcodec->channel_ref &= ~(1 << HAL_AUDCODEC_DAC_CH0);
   haudcodec->State[HAL_AUDCODEC_DAC_CH0] = HAL_AUDCODEC_STATE_READY;
@@ -415,9 +434,11 @@ void audec_dac0_dma_irq_handler(AudioDevice *audio_device) {
 
 static void prv_audio_trans_bg(void *data) {
   AudioDeviceState *state = (AudioDeviceState *)data;
+  if (state->trans_cb && state->circ_buffer_storage) {
+    uint32_t free_size = circular_buffer_get_write_space_remaining(&state->circ_buffer);
+    state->trans_cb(&free_size);
+  }
   state->callback_pending = false;
-  uint32_t free_size = circular_buffer_get_write_space_remaining(&state->circ_buffer);
-  state->trans_cb(&free_size);
 }
 
 static void prv_dma_request_processing(AudioDeviceState *state) {
@@ -426,7 +447,13 @@ static void prv_dma_request_processing(AudioDeviceState *state) {
 
   uint32_t available_data = circular_buffer_get_read_space_remaining(&state->circ_buffer);
   uint32_t trans_size = CFG_AUDIO_PLAYBACK_PIPE_SIZE;
+#ifdef CONFIG_SPEAKER_SF32LB_DIAGNOSTICS
+  ++state->diagnostic_refills;
+#endif
   if (available_data < CFG_AUDIO_PLAYBACK_PIPE_SIZE) {
+#ifdef CONFIG_SPEAKER_SF32LB_DIAGNOSTICS
+    state->diagnostic_underrun_bytes += CFG_AUDIO_PLAYBACK_PIPE_SIZE - available_data;
+#endif
     PBL_LOG_DBG("audio data not enough remain:%" PRIu32 "", available_data);
     memset(state->queue_buf[HAL_AUDCODEC_DAC_CH0], 0, CFG_AUDIO_PLAYBACK_PIPE_SIZE);
     trans_size = available_data;
@@ -437,11 +464,41 @@ static void prv_dma_request_processing(AudioDeviceState *state) {
     PBL_ASSERT(bytes_copied == trans_size, "circ buffer read err");
     circular_buffer_consume(&state->circ_buffer, bytes_copied);
   }
+#ifdef CONFIG_SPEAKER_SF32LB_DIAGNOSTICS
+  const int16_t *pcm = (const int16_t *)state->queue_buf[HAL_AUDCODEC_DAC_CH0];
+  for (unsigned i = 0; i < CFG_AUDIO_PLAYBACK_PIPE_SIZE / sizeof(*pcm); ++i) {
+    unsigned magnitude = pcm[i] < 0 ? -(int32_t)pcm[i] : pcm[i];
+    state->diagnostic_signal_samples += magnitude > 256;
+    if (magnitude > state->diagnostic_peak) {
+      state->diagnostic_peak = magnitude;
+    }
+  }
+#endif
   // Codec DMA reads this half-buffer next time it wraps; flush the CPU-side
   // writes (memset for underrun and circular_buffer_copy above) so the DAC
   // doesn't replay stale RAM contents. We always flush a full half because
   // any bytes we didn't touch were already memset() to silence.
   dcache_flush(state->queue_buf[HAL_AUDCODEC_DAC_CH0], CFG_AUDIO_PLAYBACK_PIPE_SIZE);
+  if (state->playback_cb) {
+    const unsigned samples = CFG_AUDIO_PLAYBACK_PIPE_SIZE / sizeof(int16_t);
+    const uint32_t now = pbl_ticks_to_ms(pbl_uptime_ticks()) * (AUDIO_PLAYBACK_SAMPLE_RATE / 1000);
+    const int32_t skew = (int32_t)(now + samples - state->playback_time);
+    if (!state->playback_started) {
+      // The other half is playing now; this newly filled half follows it.
+      uint8_t *base = state->audcodec.buf[HAL_AUDCODEC_DAC_CH0];
+      uint8_t *playing = state->queue_buf[HAL_AUDCODEC_DAC_CH0] == base
+                             ? base + CFG_AUDIO_PLAYBACK_PIPE_SIZE
+                             : base;
+      state->playback_cb((const int16_t *)playing, samples, now, state->playback_context);
+      state->playback_time = now + samples;
+      state->playback_started = true;
+    } else if (skew < -PLAYBACK_RESYNC_SAMPLES || skew > PLAYBACK_RESYNC_SAMPLES) {
+      state->playback_time = now + samples;
+    }
+    state->playback_cb((const int16_t *)state->queue_buf[HAL_AUDCODEC_DAC_CH0], samples,
+                       state->playback_time, state->playback_context);
+    state->playback_time += samples;
+  }
   uint32_t free_size = circular_buffer_get_write_space_remaining(&state->circ_buffer);
   // Only one refill callback may be in flight: this ISR fires every half
   // buffer, and enqueueing on each one floods the system task queue when

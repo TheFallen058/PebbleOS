@@ -18,7 +18,7 @@
 
 #include "git_version.auto.h"
 
-#include <bluetooth/bluetooth_types.h>
+#include <pbl/bluetooth/types.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -64,7 +64,7 @@ typedef struct {
   TextLayer serial;
 
   char serial_buffer[MFG_SERIAL_NUMBER_SIZE + 1];
-  char bt_mac_buffer[BT_DEVICE_ADDRESS_FMT_BUFFER_SIZE];
+  char bt_mac_buffer[PBL_BT_ADDR_FMT_BUFFER_SIZE];
   char qr_buffer[128];
 } AppData;
 

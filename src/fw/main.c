@@ -26,7 +26,7 @@
 #include <pbl/drivers/otp.h>
 #include <pbl/drivers/pmic.h>
 #include <pbl/drivers/pressure.h>
-#include <pbl/drivers/task_watchdog.h>
+#include <pbl/task_wdt/task_wdt.h>
 #include <pbl/drivers/temperature.h>
 #include <pbl/drivers/touch/touch_sensor.h>
 #include <pbl/drivers/vibe.h>
@@ -58,6 +58,7 @@
 #include "kernel/util/delay.h"
 #include "util/mbuf.h"
 #include "system/firmware_storage.h"
+#include "system/passert.h"
 #include "system/version.h"
 
 #include "kernel/event_loop.h"
@@ -74,7 +75,10 @@
 #include "mfg/mfg_info.h"
 #include "mfg/mfg_serials.h"
 
-#include <bluetooth/init.h>
+#include <pbl/bluetooth/init.h>
+#ifdef CONFIG_QEMU
+#include <pbl/drivers/qemu/qemu_serial.h>
+#endif
 
 void soc_early_init(void);
 
@@ -141,11 +145,22 @@ int main(void) {
   pbl_kernel_start();
 }
 
+static int s_new_timers_wdt_channel = -1;
+
+static void *prv_new_timers_wdt_expired(int channel_id, void *user_data) {
+  return new_timer_debug_get_current_callback();
+}
+
 static void watchdog_timer_callback(void *data) {
-  task_watchdog_bit_set(PebbleTask_NewTimers);
+  pbl_task_wdt_feed(s_new_timers_wdt_channel);
 }
 
 static void register_system_timers(void) {
+  s_new_timers_wdt_channel =
+      pbl_task_wdt_add(pebble_task_get_thread(PebbleTask_NewTimers), CONFIG_TASK_WDT_TIMEOUT_MS,
+                       prv_new_timers_wdt_expired, NULL);
+  PBL_ASSERTN(s_new_timers_wdt_channel >= 0);
+
   static RegularTimerInfo watchdog_timer = {.list_node = {0, 0}, .cb = watchdog_timer_callback};
   regular_timer_add_seconds_callback(&watchdog_timer);
 }
@@ -256,11 +271,9 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   new_timer_service_init();
   regular_timer_init();
 
-  // Initialize the task watchdog and immediately pause it for 30 seconds to
-  // give us time to initialize everything without worrying about task watchdog
-  // from firing if we block other tasks.
-  task_watchdog_init();
-  task_watchdog_pause(30);
+  // Suspend the task watchdog while the rest of the system comes up.
+  pbl_task_wdt_init();
+  pbl_task_wdt_suspend(30 * 1000);
 
   pbl_analytics_init();
   register_system_timers();
@@ -316,7 +329,10 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   compositor_init();
   kernel_ui_init();
 
-  bt_driver_init();
+#ifdef CONFIG_QEMU
+  qemu_serial_init();
+#endif
+  pbl_bt_init();
 
   services_init();
 
@@ -329,7 +345,7 @@ static PBL_NOINLINE void prv_main_task_init(void) {
 
   clear_reset_loop_detection_bits();
 
-  task_watchdog_mask_set(PebbleTask_KernelMain);
+  PBL_ASSERTN(pbl_task_wdt_add(NULL, CONFIG_TASK_WDT_TIMEOUT_MS, NULL, NULL) >= 0);
 
   // Leave the board with stop and sleep mode debugging enabled for at least 10
   // seconds to give OpenOCD time to start and still able to connect when it is
@@ -349,7 +365,7 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   // entering the kernel event queue.
   debounced_button_init();
 
-  task_watchdog_resume();
+  pbl_task_wdt_resume();
 }
 
 static void main_task(void *parameter) {
