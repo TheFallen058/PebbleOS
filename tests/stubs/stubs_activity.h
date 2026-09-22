@@ -69,6 +69,23 @@ uint8_t PBL_WEAK activity_prefs_heart_get_resting_hr(void) {
   return 70;
 }
 
+uint16_t PBL_WEAK activity_prefs_get_weight_dag(void) {
+  return ACTIVITY_DEFAULT_WEIGHT_DAG;
+}
+
+void PBL_WEAK activity_prefs_set_weight_dag(uint16_t weight_dag) {
+}
+
+bool PBL_WEAK activity_weight_history_remove_latest(time_t utc_sec,
+                                                    uint16_t *new_weight_dag) {
+  return false;
+}
+
+size_t PBL_WEAK activity_weight_history_get_recent(ActivityWeightSample *samples,
+                                                   size_t max_samples) {
+  return 0;
+}
+
 uint8_t PBL_WEAK activity_prefs_heart_get_elevated_hr(void) {
   return 100;
 }
