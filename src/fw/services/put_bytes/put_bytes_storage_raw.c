@@ -3,9 +3,8 @@
 
 #include "pbl/services/put_bytes/put_bytes_storage_raw.h"
 
-#include "bluetooth/responsiveness.h"
+#include "pbl/bluetooth/responsiveness.h"
 #include <pbl/drivers/flash.h>
-#include <pbl/drivers/task_watchdog.h>
 #include "flash_region/flash_region.h"
 #include "kernel/pbl_malloc.h"
 #include "resource/resource_storage_flash.h"
@@ -115,20 +114,14 @@ bool pb_storage_raw_init(PutBytesStorage *storage, PutBytesObjectType object_typ
 
   storage->current_offset = layout->start_offset;
 
-  // This erase operation will take awhile, so disable the task watchdog for the current task
-  // while we're doing this.
-  bool previous_system_task_watchdog_state = task_watchdog_mask_get(PebbleTask_KernelBackground);
-  if (previous_system_task_watchdog_state) {
-    task_watchdog_mask_clear(PebbleTask_KernelBackground);
-  }
-
   if (append_offset == 0) {
     // Reduce BLE activity while the blocking erase runs, to lower stack pressure on the
-    // NimbleHost task. Scoped to the erase only: this shares BtConsumerPpPutBytes with the
-    // ResponseTimeMin request held during chunk streaming, so leaving it in place would cancel
-    // the fast connection interval.
-    comm_session_set_responsiveness(comm_session_get_system_session(), BtConsumerPpPutBytes,
-                                    ResponseTimeMiddle, MIN_LATENCY_MODE_TIMEOUT_PUT_BYTES_SECS);
+    // NimbleHost task. Scoped to the erase only: this shares PBL_BT_CONSUMER_PP_PUT_BYTES with the
+    // PBL_BT_RESPONSE_TIME_MIN request held during chunk streaming, so leaving it in place would
+    // cancel the fast connection interval.
+    comm_session_set_responsiveness(comm_session_get_system_session(), PBL_BT_CONSUMER_PP_PUT_BYTES,
+                                    PBL_BT_RESPONSE_TIME_MIDDLE,
+                                    PBL_BT_MIN_LATENCY_MODE_TIMEOUT_PUT_BYTES_SECS);
 
     // By erasing the entire region we make it more likely for 'pb_storage_raw_get_status' to
     // recover the correct location.
@@ -136,15 +129,12 @@ bool pb_storage_raw_init(PutBytesStorage *storage, PutBytesObjectType object_typ
                                      layout->end_address, layout->end_address);
 
     // Restore the fast interval so the init ACK isn't delayed by the slow connection parameters.
-    comm_session_set_responsiveness(comm_session_get_system_session(), BtConsumerPpPutBytes,
-                                    ResponseTimeMin, MIN_LATENCY_MODE_TIMEOUT_PUT_BYTES_SECS);
+    comm_session_set_responsiveness(comm_session_get_system_session(), PBL_BT_CONSUMER_PP_PUT_BYTES,
+                                    PBL_BT_RESPONSE_TIME_MIN,
+                                    PBL_BT_MIN_LATENCY_MODE_TIMEOUT_PUT_BYTES_SECS);
   } else {
     // Some data we want has already been written, just continue from last valid location!
     storage->current_offset += append_offset;
-  }
-
-  if (previous_system_task_watchdog_state) {
-    task_watchdog_mask_set(PebbleTask_KernelBackground);
   }
 
   return true;
@@ -177,6 +167,7 @@ uint32_t pb_storage_raw_calculate_crc(PutBytesStorage *storage, PutBytesCrcType 
 
 void pb_storage_raw_deinit(PutBytesStorage *storage, bool is_success) {
   // Restore normal BLE responsiveness that was reduced in pb_storage_raw_init
-  comm_session_set_responsiveness(comm_session_get_system_session(), BtConsumerPpPutBytes,
-                                  ResponseTimeMin, MIN_LATENCY_MODE_TIMEOUT_PUT_BYTES_SECS);
+  comm_session_set_responsiveness(comm_session_get_system_session(), PBL_BT_CONSUMER_PP_PUT_BYTES,
+                                  PBL_BT_RESPONSE_TIME_MIN,
+                                  PBL_BT_MIN_LATENCY_MODE_TIMEOUT_PUT_BYTES_SECS);
 }

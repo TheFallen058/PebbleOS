@@ -24,9 +24,10 @@
 
 #include "pbl/util/size.h"
 
-#include <bluetooth/pairing_confirm.h>
+#include <pbl/bluetooth/pairing_confirm.h>
 
 #include <string.h>
+#include "pbl/kernel/compiler.h"
 
 #define CODE_BUF_SIZE    16
 #define MAX_PAIR_STR_LEN 16
@@ -60,12 +61,12 @@ typedef struct BTPairingUIData {
   int translated_str_idx;
 #endif
   TextLayer device_name_text_layer;
-  char device_name_layer_buffer[BT_DEVICE_NAME_BUFFER_SIZE];
+  char device_name_layer_buffer[PBL_BT_DEVICE_NAME_BUFFER_SIZE];
   TextLayer code_text_layer;
   char code_text_layer_buffer[CODE_BUF_SIZE];
   TimerID timer;
   BTPairingUIState ui_state;
-  const PairingUserConfirmationCtx *ctx;
+  const struct pbl_bt_pairing_confirm_ctx *ctx;
 
 } BTPairingUIData;
 
@@ -245,7 +246,7 @@ static void prv_adjust_background_frame_for_state(BTPairingUIData *data) {
   GAlign alignment;
   const int16_t width_of_sidebar = data->action_bar_layer.layer.frame.size.w;
   const int16_t window_width = data->window.layer.bounds.size.w;
-  const int16_t config_width __attribute__((unused)) = window_width - width_of_sidebar + 10;
+  const int16_t config_width PBL_UNUSED = window_width - width_of_sidebar + 10;
   int16_t x_offset, y_offset, width;
 
   switch (data->ui_state) {
@@ -305,7 +306,7 @@ static void prv_send_response(bool is_confirmed) {
   }
 
   bt_lock();
-  bt_driver_pairing_confirm(s_data_ptr->ctx, is_confirmed);
+  pbl_bt_pairing_confirm(s_data_ptr->ctx, is_confirmed);
   bt_unlock();
 }
 
@@ -544,7 +545,7 @@ static void prv_create_new_pairing_data(void) {
   s_data_ptr = data;
 }
 
-static void prv_handle_confirmation_request(const PairingUserConfirmationCtx *ctx,
+static void prv_handle_confirmation_request(const struct pbl_bt_pairing_confirm_ctx *ctx,
                                             PebbleBluetoothPairingConfirmationInfo *info) {
   prv_create_new_pairing_data();
 
@@ -619,7 +620,7 @@ void bluetooth_pairing_ui_handle_event(PebbleBluetoothPairEvent *event) {
 
 static void prv_put_pairing_event(const PebbleBluetoothPairEvent *pair_event) {
   PebbleEvent event = {
-    .type = PEBBLE_BT_PAIRING_EVENT,
+    .type = PBL_BT_PEBBLE_PAIRING_EVENT,
     .bluetooth.pair = *pair_event,
   };
   event_put(&event);
@@ -635,9 +636,9 @@ static void prv_copy_string_and_move_cursor(const char *in_str, char **out_str, 
   *cursor += str_size_bytes;
 }
 
-void bt_driver_cb_pairing_confirm_handle_request(const PairingUserConfirmationCtx *ctx,
-                                                 const char *device_name,
-                                                 const char *confirmation_token) {
+void pbl_bt_cb_pairing_confirm_handle_request(const struct pbl_bt_pairing_confirm_ctx *ctx,
+                                              const char *device_name,
+                                              const char *confirmation_token) {
   // events.c clean-up (see event_deinit) can only clean up one associated heap allocation,
   // so put everything in a single buffer:
   size_t device_name_len = device_name ? (strlen(device_name) + 1) : 0;
@@ -667,8 +668,8 @@ void bt_driver_cb_pairing_confirm_handle_request(const PairingUserConfirmationCt
   prv_put_pairing_event(&pair_event);
 }
 
-void bt_driver_cb_pairing_confirm_handle_completed(const PairingUserConfirmationCtx *ctx,
-                                                   bool success) {
+void pbl_bt_cb_pairing_confirm_handle_completed(const struct pbl_bt_pairing_confirm_ctx *ctx,
+                                                bool success) {
   PebbleBluetoothPairEvent pair_event = {
     .type = PebbleBluetoothPairEventTypePairingComplete,
     .ctx = ctx,

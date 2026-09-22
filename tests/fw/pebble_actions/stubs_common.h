@@ -48,7 +48,7 @@
 #include "stubs_reminder_db.h"
 #include "stubs_rtc.h"
 #include "stubs_simple_dialog.h"
-#include "stubs_task_watchdog.h"
+#include "stubs_task_wdt.h"
 #include "stubs_ui_window.h"
 #include "stubs_window_manager.h"
 #include "stubs_window_stack.h"
@@ -78,8 +78,9 @@ CommSession *comm_session_get_system_session(void) {
   return (CommSession *)1;
 }
 
-void comm_session_set_responsiveness(CommSession *session, BtConsumer consumer,
-                                     ResponseTimeState state, uint16_t max_period_secs) {
+void comm_session_set_responsiveness(CommSession *session, enum pbl_bt_consumer consumer,
+                                     enum pbl_bt_response_time_state state,
+                                     uint16_t max_period_secs) {
   return;
 }
 
