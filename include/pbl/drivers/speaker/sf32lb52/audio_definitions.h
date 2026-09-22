@@ -38,6 +38,10 @@ typedef struct AudioState {
   uint8_t *circ_buffer_storage;
   CircularBuffer circ_buffer;
   AudioTransCB trans_cb;
+  AudioPlaybackCB playback_cb;
+  void *playback_context;
+  uint32_t playback_time;
+  bool playback_started;
   //! Set while a prv_audio_trans_bg refill callback is queued on the system
   //! task; the DMA ISR must not enqueue another until it has run.
   volatile bool callback_pending;
@@ -46,6 +50,13 @@ typedef struct AudioState {
   //! DMA buffer. haudcodec->buf[] is bumped up to a cache-line boundary so
   //! dcache_flush() of one half can't touch the other half's lines.
   uint8_t *raw_dac_buffer;
+#ifdef CONFIG_SPEAKER_SF32LB_DIAGNOSTICS
+  volatile uint32_t diagnostic_refills;
+  volatile uint32_t diagnostic_underrun_bytes;
+  volatile uint32_t diagnostic_signal_samples;
+  volatile uint32_t diagnostic_peak;
+  uint32_t diagnostic_write_drops;
+#endif
 } AudioDeviceState;
 
 typedef const struct AudioDevice {

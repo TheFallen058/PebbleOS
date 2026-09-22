@@ -74,7 +74,10 @@
 #include "mfg/mfg_info.h"
 #include "mfg/mfg_serials.h"
 
-#include <bluetooth/init.h>
+#include <pbl/bluetooth/init.h>
+#ifdef CONFIG_QEMU
+#include <pbl/drivers/qemu/qemu_serial.h>
+#endif
 
 void soc_early_init(void);
 
@@ -316,7 +319,10 @@ static PBL_NOINLINE void prv_main_task_init(void) {
   compositor_init();
   kernel_ui_init();
 
-  bt_driver_init();
+#ifdef CONFIG_QEMU
+  qemu_serial_init();
+#endif
+  pbl_bt_init();
 
   services_init();
 
