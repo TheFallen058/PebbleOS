@@ -39,6 +39,7 @@ static CommSession *s_session_head;
 
 static int s_session_close_call_count;
 static int s_session_open_call_count;
+static CommSessionCapability s_capability_flags = ~0;
 
 bool comm_session_is_valid(const CommSession *session) {
   return list_contains((ListNode *)s_session_head, &session->node);
@@ -58,7 +59,11 @@ static bool prv_find_session_is_system_filter(ListNode *found_node, void *data) 
 }
 
 bool comm_session_has_capability(CommSession *session, CommSessionCapability capability) {
-  return true;
+  return (s_capability_flags & capability) == capability;
+}
+
+void fake_comm_session_set_capabilities(CommSessionCapability capability_flags) {
+  s_capability_flags = capability_flags;
 }
 
 CommSession *comm_session_get_by_type(CommSessionType type) {
@@ -476,6 +481,7 @@ void fake_comm_session_init(void) {
   s_session_close_call_count = 0;
   s_session_open_call_count = 0;
   s_last_responsiveness_granted_handler = NULL;
+  s_capability_flags = ~0;
 }
 
 void fake_comm_session_cleanup(void) {

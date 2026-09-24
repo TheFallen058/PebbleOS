@@ -208,6 +208,7 @@ typedef enum {
   PebbleMediaEventTypeServerDisconnected,
   PebbleMediaEventTypeTrackPosChanged,
   PebbleMediaEventTypeAlbumArtUpdated,
+  PebbleMediaEventTypeOutputRoutesChanged,
 } PebbleMediaEventType;
 
 typedef struct PBL_PACKED { // 2 bytes
