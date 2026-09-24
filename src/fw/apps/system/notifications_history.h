@@ -9,20 +9,22 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef struct NotificationHistoryMember {
-  ListNode node;
+typedef struct NotificationHistoryEntry {
   Uuid id;
   time_t timestamp;
   uint32_t sequence;
+} NotificationHistoryEntry;
+
+typedef struct NotificationHistoryMember {
+  ListNode node;
+  NotificationHistoryEntry entry;
 } NotificationHistoryMember;
 
 typedef struct NotificationHistoryRow {
   ListNode node;
   bool is_group;
-  time_t timestamp;
-  uint32_t sequence;
   union {
-    Uuid notification_id;
+    NotificationHistoryEntry notification;
     struct {
       char *sender;
       NotificationHistoryMember *members;
@@ -53,4 +55,3 @@ NotificationHistoryRow *notifications_history_get_row(const NotificationHistory 
 bool notifications_history_has_collapsed_groups(const NotificationHistory *history);
 bool notifications_history_row_is_collapsed_group(const NotificationHistoryRow *row);
 const Uuid *notifications_history_row_get_latest_id(const NotificationHistoryRow *row);
-uint16_t notifications_history_row_get_count(const NotificationHistoryRow *row);

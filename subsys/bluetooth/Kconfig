@@ -36,6 +36,14 @@ config BT_HCI_SF32LB52
       Talk H4 HCI to the SiFli controller running on the LCPU through the
       mailbox IPC queue.
 
+config BT_HCI_UART
+    bool "H4 over UART"
+    depends on QEMU
+    help
+      Talk H4 HCI to an external controller over the board's BT_HCI_UART.
+      On QEMU this is the fourth serial port, which can be attached to a
+      host controller such as an nRF52840 dongle running Zephyr's hci_uart.
+
 config BT_HCI_FAKE
     bool "Fake controller"
     help
@@ -44,6 +52,40 @@ config BT_HCI_FAKE
       can be established. For targets without a radio, such as QEMU.
 
 endchoice
+
+choice BT_ID_ADDR_SOURCE
+    prompt "Identity address"
+    default BT_ID_ADDR_CONTROLLER
+    help
+      Where the watch's Bluetooth identity address comes from. The default
+      is derived from the SoC (see each soc/<soc>/Kconfig.defconfig).
+
+config BT_ID_ADDR_CONTROLLER
+    bool "Controller"
+    help
+      Use the address the controller reports, or let NimBLE pick one.
+
+config BT_ID_ADDR_SF32LB52_EFUSE
+    bool "SF32LB52 eFUSE"
+    depends on SOC_SF32LB52
+    select BT_ID_ADDR
+    help
+      Public address derived from the unique ID in the SoC's eFUSE.
+
+config BT_ID_ADDR_STORAGE
+    bool "Stored random static address"
+    depends on SERVICE_SHARED_PRF_STORAGE
+    select BT_ID_ADDR
+    help
+      Generate a random static address once and keep it in shared PRF
+      storage, for controllers without an address of their own.
+
+endchoice
+
+config BT_ID_ADDR
+    bool
+    help
+      An identity address backend is selected (pbl/bluetooth/id_addr.h).
 
 module = BT
 module-str = Bluetooth

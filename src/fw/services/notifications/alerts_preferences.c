@@ -10,6 +10,7 @@
 #include "pbl/services/vibes/vibe_intensity.h"
 #include "shell/prefs_private.h"
 #include "system/passert.h"
+#include "pbl/util/math.h"
 #include "pbl/kernel/mutex.h"
 
 #include <string.h>
@@ -396,9 +397,6 @@ void alerts_preferences_init(void) {
   if (s_speaker_volume > 100) {
     s_speaker_volume = 100;
   }
-  if (s_notification_grouping_range >= NotificationGroupingRangeCount) {
-    s_notification_grouping_range = NotificationGroupingRange_Never;
-  }
   prv_save_changed_vibe_scores_to_file(&file, orig_vibe_score_notifications,
                                        orig_vibe_score_incoming_calls, orig_vibe_score_alarms,
                                        orig_vibe_score_hourly, orig_vibe_score_on_disconnect);
@@ -435,7 +433,7 @@ void alerts_preferences_set_alert_mask(AlertMask mask) {
 }
 
 uint32_t alerts_preferences_get_notification_window_timeout_ms(void) {
-  return s_notif_window_timeout_ms;
+  return MAX(s_notif_window_timeout_ms, NOTIF_WINDOW_TIMEOUT_MIN);
 }
 
 void alerts_preferences_set_notification_window_timeout_ms(uint32_t timeout_ms) {
@@ -477,8 +475,7 @@ NotificationGroupingRange alerts_preferences_get_notification_grouping_range(voi
 }
 
 void alerts_preferences_set_notification_grouping_range(NotificationGroupingRange range) {
-  s_notification_grouping_range =
-      (range < NotificationGroupingRangeCount) ? range : NotificationGroupingRange_Never;
+  s_notification_grouping_range = range;
   SET_PREF(PREF_KEY_NOTIF_GROUPING_RANGE, s_notification_grouping_range);
 }
 

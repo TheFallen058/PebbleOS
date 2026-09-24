@@ -45,6 +45,37 @@ The launched QEMU exposes:
 
 UART1 output is also captured to `uart1.log` in the repository root.
 
+## Bluetooth
+
+By default the NimBLE host runs against a fake controller that accepts
+every command but never forms a link. To use a real radio, attach an H4 HCI
+controller to the emulator's fourth UART (QEMU pebble19 or later). An nRF52840 Dongle running
+Zephyr's `hci_uart` sample shows up as a USB serial port and works out of
+the box:
+
+```shell
+west build -b nrf52840dongle/nrf52840 zephyr/samples/bluetooth/hci_uart
+nrfutil pkg generate --hw-version 52 --sd-req=0x00 \
+  --application build/zephyr/zephyr.hex --application-version 1 hci_uart.zip
+# press the dongle's reset button to enter the bootloader
+nrfutil dfu usb-serial -pkg hci_uart.zip -p /dev/cu.usbmodemXXXX
+```
+
+Then build with the UART transport and pass the controller's port:
+
+```shell
+pbl configure --board qemu_flint -DCONFIG_BT_HCI_UART=y
+pbl build
+pbl qemu --bt-hci /dev/cu.usbmodemXXXX
+```
+
+`--bt-hci` takes any QEMU `-serial` spec, e.g. `tcp:localhost:9000`. On
+macOS use the `cu.*` device: opening `tty.*` blocks until carrier detect.
+
+The watch generates its identity address on first boot and keeps it in
+flash, so pass `--keep-flash-image` to keep existing bondings across
+launches. A fresh flash image gets a new address.
+
 ## Console
 
 You can launch a console using:
@@ -112,6 +143,9 @@ pbl feed music --title "Demo" --paused   # a single track of your own
 pbl feed calendar                       # a day of events around now
 pbl feed calendar --title "Dentist" --start 15 --location "Downtown"
 pbl feed calendar --clear               # remove every pin
+pbl feed notifications                  # a few messages from two senders
+pbl feed notifications --sender Anna --body "Lunch?" --app WhatsApp
+pbl feed notifications --clear          # remove every notification
 ```
 
 `pbl feed --help` lists the feeds and `pbl feed <feed> --help` their options.
