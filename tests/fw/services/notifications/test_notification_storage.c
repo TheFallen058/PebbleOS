@@ -151,9 +151,21 @@ static void compare_notifications(TimelineItem *a, TimelineItem *b) {
 typedef struct {
   Uuid older_id;
   Uuid recent_id;
+  const char *expected_title;
   uint8_t header_count;
   uint8_t item_count;
 } NotificationItemsIteratorContext;
+
+static char s_title_buffer[ATTRIBUTE_TITLE_MAX_LEN + 1];
+static char s_sender_buffer[ATTRIBUTE_TITLE_MAX_LEN + 1];
+static Attribute s_string_attributes[] = {
+  {.id = AttributeIdTitle, .cstring = s_title_buffer},
+  {.id = AttributeIdSender, .cstring = s_sender_buffer},
+};
+static AttributeList s_string_attr_list = {
+  .num_attributes = ARRAY_LENGTH(s_string_attributes),
+  .attributes = s_string_attributes,
+};
 
 static bool prv_items_iterator_callback(void *data, const CommonTimelineItemHeader *header,
                                         const TimelineItem *item) {
@@ -161,7 +173,10 @@ static bool prv_items_iterator_callback(void *data, const CommonTimelineItemHead
   if (item) {
     context->item_count++;
     cl_assert(uuid_equal(&item->header.id, &context->recent_id));
-    cl_assert_equal_s(attribute_get_string(&item->attr_list, AttributeIdTitle, NULL), "Sender");
+    cl_assert_equal_s(attribute_get_string(&item->attr_list, AttributeIdTitle, NULL),
+                      context->expected_title);
+    cl_assert_equal_s(attribute_get_string(&item->attr_list, AttributeIdSender, NULL), "");
+    cl_assert(attribute_get_string(&item->attr_list, AttributeIdBody, NULL) == NULL);
   } else {
     context->header_count++;
     cl_assert(uuid_equal(&header->id, &context->older_id));
@@ -225,7 +240,7 @@ void test_notification_storage__basic(void) {
   cl_assert_equal_b(notification_storage_get(&invalid_uuid, &r), false);
 }
 
-void test_notification_storage__iterate_items_after_skips_old_and_deleted_payloads(void) {
+void test_notification_storage__iterate_strings_after_skips_old_and_deleted_payloads(void) {
   TimelineItem older = {
     .header =
         {
@@ -254,14 +269,25 @@ void test_notification_storage__iterate_items_after_skips_old_and_deleted_payloa
   NotificationItemsIteratorContext context = {
     .older_id = older.header.id,
     .recent_id = recent.header.id,
+    .expected_title = "Sender",
   };
-  notification_storage_iterate_items_after(200, prv_items_iterator_callback, &context);
+  notification_storage_iterate_strings_after(200, &s_string_attr_list, sizeof(s_title_buffer),
+                                             prv_items_iterator_callback, &context);
+
+  cl_assert_equal_i(context.header_count, 1);
+  cl_assert_equal_i(context.item_count, 1);
+
+  context.header_count = 0;
+  context.item_count = 0;
+  context.expected_title = "Sen";
+  notification_storage_iterate_strings_after(200, &s_string_attr_list, 4,
+                                             prv_items_iterator_callback, &context);
 
   cl_assert_equal_i(context.header_count, 1);
   cl_assert_equal_i(context.item_count, 1);
 }
 
-void test_notification_storage__iterate_items_after_skips_corrupt_record(void) {
+void test_notification_storage__iterate_strings_after_skips_corrupt_record(void) {
   TimelineItem first = {
     .header =
         {
@@ -290,7 +316,8 @@ void test_notification_storage__iterate_items_after_skips_corrupt_record(void) {
   RecoveringNotificationItemsIteratorContext context = {
     .expected_ids = {first.header.id, last.header.id},
   };
-  notification_storage_iterate_items_after(0, prv_recovering_items_iterator_callback, &context);
+  notification_storage_iterate_strings_after(0, &s_string_attr_list, sizeof(s_title_buffer),
+                                             prv_recovering_items_iterator_callback, &context);
 
   cl_assert_equal_i(context.item_count, ARRAY_LENGTH(context.expected_ids));
 }

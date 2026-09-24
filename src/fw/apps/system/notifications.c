@@ -34,6 +34,7 @@
 #include "shell/system_theme.h"
 #include "system/passert.h"
 #include "pbl/util/list.h"
+#include "pbl/util/size.h"
 #include "pbl/util/string.h"
 #include "util/time/time.h"
 
@@ -70,7 +71,7 @@ struct NotificationGroupWindow {
   Uuid *notification_ids;
   uint16_t count;
   char *sender;
-  char time_buffer[16];
+  char time_buffer[TIME_STRING_REQUIRED_LENGTH];
 };
 
 static NotificationsData *s_data = NULL;
@@ -107,12 +108,24 @@ static bool prv_notif_item_iterator_callback(void *data, const CommonTimelineIte
 }
 
 static void prv_load_notification_storage(NotificationsData *data) {
-  if (data->history.group_by_sender) {
-    notification_storage_iterate_items_after(data->history.grouping_cutoff,
-                                             prv_notif_item_iterator_callback, data);
-  } else {
+  if (!data->history.group_by_sender) {
     notification_storage_iterate(&prv_notif_iterator_callback, data);
+    return;
   }
+
+  char sender[ATTRIBUTE_TITLE_MAX_LEN + 1];
+  char title[ATTRIBUTE_TITLE_MAX_LEN + 1];
+  Attribute attributes[] = {
+    {.id = AttributeIdSender, .cstring = sender},
+    {.id = AttributeIdTitle, .cstring = title},
+  };
+  AttributeList attr_list = {
+    .num_attributes = ARRAY_LENGTH(attributes),
+    .attributes = attributes,
+  };
+  notification_storage_iterate_strings_after(data->history.grouping_cutoff, &attr_list,
+                                             sizeof(sender), prv_notif_item_iterator_callback,
+                                             data);
 }
 
 static void prv_unload_loaded_notification(LoadedNotificationNode *loaded_notif) {
@@ -257,8 +270,8 @@ static void prv_group_window_draw_row(GContext *ctx, const Layer *cell_layer, Me
     message = attribute_get_string(&notification->attr_list, AttributeIdTitle, "[Empty]");
   }
 
-  clock_copy_time_string_timestamp(group_window->time_buffer, sizeof(group_window->time_buffer),
-                                   notification->header.timestamp);
+  clock_get_since_time(group_window->time_buffer, sizeof(group_window->time_buffer),
+                       notification->header.timestamp);
   menu_cell_basic_draw_custom(ctx, cell_layer, system_theme_get_font(TextStyleFont_MenuCellTitle),
                               message, NULL, NULL, system_theme_get_font(TextStyleFont_Caption),
                               group_window->time_buffer, NULL, false, GTextOverflowModeFill);
@@ -324,7 +337,7 @@ static void prv_push_group_window(NotificationsData *data, const NotificationHis
 
   NotificationHistoryMember *member = row->group.members;
   for (uint16_t i = 0; i < group_window->count; i++) {
-    group_window->notification_ids[i] = member->id;
+    group_window->notification_ids[i] = member->entry.id;
     member = (NotificationHistoryMember *)list_get_next(&member->node);
   }
 
@@ -836,7 +849,7 @@ static void prv_group_window_add_notification(NotificationsData *data, const Uui
       NotificationHistoryMember *member = row->group.members;
       uint16_t member_index = 0;
       while (member) {
-        if (uuid_equal(&member->id, id)) {
+        if (uuid_equal(&member->entry.id, id)) {
           Uuid *notification_ids =
               app_realloc(group_window->notification_ids, sizeof(Uuid) * (group_window->count + 1));
           if (!notification_ids) {

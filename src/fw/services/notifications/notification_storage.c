@@ -7,6 +7,8 @@
 #include "pbl/util/uuid.h"
 #include "kernel/pbl_malloc.h"
 #include "pbl/services/filesystem/pfs.h"
+#include "pbl/services/timeline/attribute_private.h"
+#include "pbl/util/math.h"
 #include <pbl/logging/logging.h>
 #include <pbl/logging/logging.h>
 #include "pbl/kernel/mutex.h"
@@ -723,8 +725,45 @@ void notification_storage_iterate(bool (*iter_callback)(void *data,
   prv_file_close(fd);
 }
 
-void notification_storage_iterate_items_after(
-    time_t item_cutoff,
+//! Reads the string attributes requested in attr_list from the payload following the header,
+//! leaving the file positioned after the payload
+static bool prv_read_string_attributes(const SerializedTimelineItemHeader *header,
+                                       AttributeList *attr_list, size_t buffer_size, int fd) {
+  for (uint8_t i = 0; i < attr_list->num_attributes; i++) {
+    attr_list->attributes[i].cstring[0] = '\0';
+  }
+
+  uint32_t remaining = header->payload_length;
+  for (uint8_t i = 0; i < header->num_attributes; i++) {
+    SerializedAttributeHeader attribute;
+    if ((remaining < sizeof(attribute)) ||
+        (pfs_read(fd, (uint8_t *)&attribute, sizeof(attribute)) < 0)) {
+      return false;
+    }
+    remaining -= sizeof(attribute);
+    if (attribute.length > remaining) {
+      return false;
+    }
+    remaining -= attribute.length;
+
+    Attribute *dest = attribute_find(attr_list, attribute.id);
+    const size_t length = dest ? MIN(attribute.length, buffer_size - 1) : 0;
+    if ((length > 0) && (pfs_read(fd, (uint8_t *)dest->cstring, length) < 0)) {
+      return false;
+    }
+    if (dest) {
+      dest->cstring[length] = '\0';
+    }
+    if (pfs_seek(fd, attribute.length - length, FSeekCur) < 0) {
+      return false;
+    }
+  }
+
+  return pfs_seek(fd, remaining, FSeekCur) >= 0;
+}
+
+void notification_storage_iterate_strings_after(
+    time_t item_cutoff, AttributeList *attr_list, size_t buffer_size,
     bool (*iter_callback)(void *data, const CommonTimelineItemHeader *header,
                           const TimelineItem *item),
     void *data) {
@@ -743,46 +782,41 @@ void notification_storage_iterate_items_after(
 
   while (iter_next(&iter)) {
     const uint8_t status = iter_state.header.common.status;
-    if ((status & TimelineItemStatusUnused) ||
-        (iter_state.header.common.type >= TimelineItemTypeOutOfRange) ||
-        (iter_state.header.common.layout >= NumLayoutIds)) {
+    const bool corrupt = (status & TimelineItemStatusUnused) ||
+                         (iter_state.header.common.type >= TimelineItemTypeOutOfRange) ||
+                         (iter_state.header.common.layout >= NumLayoutIds);
+    if (corrupt) {
       PBL_LOG_WRN("Skipping corrupt notification");
-      if (pfs_seek(fd, iter_state.header.payload_length, FSeekCur) < 0) {
-        break;
-      }
-      continue;
     }
-    if (status & TimelineItemStatusDeleted) {
+    if (corrupt || (status & TimelineItemStatusDeleted)) {
       if (pfs_seek(fd, iter_state.header.payload_length, FSeekCur) < 0) {
         break;
       }
       continue;
     }
 
-    const bool deserialize = iter_state.header.common.timestamp >= item_cutoff;
-    TimelineItem item;
-    if (deserialize) {
+    const bool read_strings = iter_state.header.common.timestamp >= item_cutoff;
+    if (read_strings) {
       const int payload_offset = pfs_seek(fd, 0, FSeekCur);
       if (payload_offset < 0) {
         break;
       }
-      if (!prv_get_notification(&item, &iter_state.header, fd)) {
+      if (!prv_read_string_attributes(&iter_state.header, attr_list, buffer_size, fd)) {
         PBL_LOG_WRN("Skipping corrupt notification payload");
         if (pfs_seek(fd, payload_offset + iter_state.header.payload_length, FSeekSet) < 0) {
           break;
         }
         continue;
       }
-    }
-
-    const bool should_continue =
-        iter_callback(data, &iter_state.header.common, deserialize ? &item : NULL);
-    if (deserialize) {
-      timeline_item_free_allocated_buffer(&item);
     } else if (pfs_seek(fd, iter_state.header.payload_length, FSeekCur) < 0) {
       break;
     }
-    if (!should_continue) {
+
+    const TimelineItem item = {
+      .header = iter_state.header.common,
+      .attr_list = *attr_list,
+    };
+    if (!iter_callback(data, &iter_state.header.common, read_strings ? &item : NULL)) {
       break;
     }
   }

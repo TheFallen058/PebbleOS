@@ -20,6 +20,10 @@ const char *attribute_get_string(const AttributeList *attr_list, AttributeId id,
   return default_value;
 }
 
+bool timeline_item_is_ancs_notif(const TimelineItem *item) {
+  return item->header.ancs_notif;
+}
+
 static Uuid prv_id(uint8_t value) {
   return UuidMake(value, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 }
@@ -98,7 +102,7 @@ void test_notifications_history__same_sender_forms_one_group(void) {
 
   cl_assert_equal_i(notifications_history_get_row_count(&s_history), 1);
   cl_assert(prv_row(0)->is_group);
-  cl_assert_equal_i(notifications_history_row_get_count(prv_row(0)), 2);
+  cl_assert_equal_i(prv_row(0)->group.count, 2);
   cl_assert(notifications_history_row_is_collapsed_group(prv_row(0)));
   cl_assert(notifications_history_has_collapsed_groups(&s_history));
   cl_assert_equal_s(prv_row(0)->group.sender, "Anna");
@@ -169,11 +173,11 @@ void test_notifications_history__groups_and_members_are_newest_first(void) {
 
   cl_assert_equal_s(prv_row(0)->group.sender, "Anna");
   NotificationHistoryMember *member = prv_row(0)->group.members;
-  prv_assert_id(&member->id, 1);
+  prv_assert_id(&member->entry.id, 1);
   member = (NotificationHistoryMember *)list_get_next(&member->node);
-  prv_assert_id(&member->id, 3);
+  prv_assert_id(&member->entry.id, 3);
   member = (NotificationHistoryMember *)list_get_next(&member->node);
-  prv_assert_id(&member->id, 2);
+  prv_assert_id(&member->entry.id, 2);
   cl_assert_equal_s(prv_row(1)->group.sender, "Bob");
 }
 
@@ -182,9 +186,9 @@ void test_notifications_history__equal_timestamps_use_insertion_order(void) {
   prv_add(2, 100, "Anna");
 
   NotificationHistoryMember *member = prv_row(0)->group.members;
-  prv_assert_id(&member->id, 2);
+  prv_assert_id(&member->entry.id, 2);
   member = (NotificationHistoryMember *)list_get_next(&member->node);
-  prv_assert_id(&member->id, 1);
+  prv_assert_id(&member->entry.id, 1);
 }
 
 void test_notifications_history__missing_sender_and_ios_remain_individual(void) {
@@ -196,9 +200,9 @@ void test_notifications_history__missing_sender_and_ios_remain_individual(void) 
   cl_assert(!prv_row(0)->is_group);
   cl_assert(!prv_row(1)->is_group);
   cl_assert(!prv_row(2)->is_group);
-  prv_assert_id(&prv_row(0)->notification_id, 3);
-  prv_assert_id(&prv_row(1)->notification_id, 2);
-  prv_assert_id(&prv_row(2)->notification_id, 1);
+  prv_assert_id(&prv_row(0)->notification.id, 3);
+  prv_assert_id(&prv_row(1)->notification.id, 2);
+  prv_assert_id(&prv_row(2)->notification.id, 1);
 }
 
 void test_notifications_history__sender_whitespace_is_trimmed_without_case_folding(void) {
@@ -238,7 +242,7 @@ void test_notifications_history__mixed_grouped_and_individual_notifications(void
   prv_add(4, 200, "Bob");
 
   cl_assert_equal_i(notifications_history_get_row_count(&s_history), 3);
-  prv_assert_id(&prv_row(0)->notification_id, 2);
+  prv_assert_id(&prv_row(0)->notification.id, 2);
   cl_assert_equal_s(prv_row(1)->group.sender, "Anna");
   cl_assert_equal_i(prv_row(1)->group.count, 2);
   cl_assert_equal_s(prv_row(2)->group.sender, "Bob");
@@ -265,9 +269,9 @@ void test_notifications_history__disabled_preserves_storage_iteration_order(void
   notifications_history_add_header(&s_history, &third);
 
   cl_assert_equal_i(notifications_history_get_row_count(&s_history), 3);
-  prv_assert_id(&prv_row(0)->notification_id, 3);
-  prv_assert_id(&prv_row(1)->notification_id, 2);
-  prv_assert_id(&prv_row(2)->notification_id, 1);
+  prv_assert_id(&prv_row(0)->notification.id, 3);
+  prv_assert_id(&prv_row(1)->notification.id, 2);
+  prv_assert_id(&prv_row(2)->notification.id, 1);
 }
 
 void test_notifications_history__only_notifications_within_range_are_grouped(void) {
@@ -283,5 +287,5 @@ void test_notifications_history__only_notifications_within_range_are_grouped(voi
   cl_assert_equal_i(prv_row(0)->group.count, 2);
   prv_assert_id(notifications_history_row_get_latest_id(prv_row(0)), 3);
   cl_assert(!prv_row(1)->is_group);
-  prv_assert_id(&prv_row(1)->notification_id, 1);
+  prv_assert_id(&prv_row(1)->notification.id, 1);
 }

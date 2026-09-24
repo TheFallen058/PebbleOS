@@ -6,110 +6,70 @@
 #include "kernel/pbl_malloc.h"
 #include "pbl/services/timeline/attribute.h"
 #include "pbl/services/timeline/timeline.h"
+#include "pbl/util/string.h"
 
-#include <ctype.h>
 #include <string.h>
 
-typedef struct StringRange {
-  const char *start;
-  size_t length;
-} StringRange;
-
-static int prv_compare_position(time_t timestamp_a, uint32_t sequence_a, time_t timestamp_b,
-                                uint32_t sequence_b) {
-  if (timestamp_a > timestamp_b) {
-    return -1;
+static int prv_compare_entries(const NotificationHistoryEntry *a,
+                               const NotificationHistoryEntry *b) {
+  if (a->timestamp != b->timestamp) {
+    return (a->timestamp > b->timestamp) ? -1 : 1;
   }
-  if (timestamp_a < timestamp_b) {
-    return 1;
-  }
-  if (sequence_a > sequence_b) {
-    return -1;
-  }
-  if (sequence_a < sequence_b) {
-    return 1;
+  if (a->sequence != b->sequence) {
+    return (a->sequence > b->sequence) ? -1 : 1;
   }
   return 0;
 }
 
+static const NotificationHistoryEntry *prv_row_entry(const NotificationHistoryRow *row) {
+  return row->is_group ? &row->group.members->entry : &row->notification;
+}
+
 static int prv_row_comparator(void *a, void *b) {
-  NotificationHistoryRow *row_a = a;
-  NotificationHistoryRow *row_b = b;
-  return prv_compare_position(row_a->timestamp, row_a->sequence, row_b->timestamp, row_b->sequence);
+  return prv_compare_entries(prv_row_entry(a), prv_row_entry(b));
 }
 
 static int prv_member_comparator(void *a, void *b) {
-  NotificationHistoryMember *member_a = a;
-  NotificationHistoryMember *member_b = b;
-  return prv_compare_position(member_a->timestamp, member_a->sequence, member_b->timestamp,
-                              member_b->sequence);
+  return prv_compare_entries(&((NotificationHistoryMember *)a)->entry,
+                             &((NotificationHistoryMember *)b)->entry);
 }
 
-static StringRange prv_trimmed_string_range(const char *string) {
-  if (!string) {
-    return (StringRange){};
-  }
-
-  const char *start = string;
-  while (*start && isspace((unsigned char)*start)) {
-    start++;
-  }
-
-  const char *end = start + strlen(start);
-  while (end > start && isspace((unsigned char)*(end - 1))) {
-    end--;
-  }
-
-  return (StringRange){
-    .start = start,
-    .length = (size_t)(end - start),
-  };
-}
-
-static StringRange prv_conversation_range_from_title(const char *title) {
-  StringRange range = prv_trimmed_string_range(title);
-  if (!range.start) {
-    return range;
-  }
-
-  const char *separator = strstr(range.start, ": ");
-  const char *end = range.start + range.length;
-  if (!separator || separator == range.start || separator + 2 >= end) {
-    return range;
-  }
-
-  range.length = (size_t)(separator - range.start);
-  while (range.length > 0 && isspace((unsigned char)range.start[range.length - 1])) {
-    range.length--;
-  }
-  return range;
-}
-
-static bool prv_group_sender_for_item(const TimelineItem *item, StringRange *sender_out) {
+static const char *prv_group_sender_for_item(const TimelineItem *item, char *buffer,
+                                             size_t buffer_size) {
   static const Uuid s_android_notifications_source = UUID_NOTIFICATIONS_DATA_SOURCE;
 
-  if (item->header.ancs_notif ||
+  if (timeline_item_is_ancs_notif(item) ||
       !uuid_equal(&item->header.parent_id, &s_android_notifications_source)) {
-    return false;
+    return NULL;
   }
 
-  const char *sender = attribute_get_string(&item->attr_list, AttributeIdSender, NULL);
-  if (sender) {
-    *sender_out = prv_trimmed_string_range(sender);
-  } else {
-    const char *title = attribute_get_string(&item->attr_list, AttributeIdTitle, NULL);
-    *sender_out = prv_conversation_range_from_title(title);
+  const char *sender = attribute_get_string(&item->attr_list, AttributeIdSender, "");
+  const bool from_title = IS_EMPTY_STRING(sender);
+  if (from_title) {
+    sender = attribute_get_string(&item->attr_list, AttributeIdTitle, "");
   }
 
-  return sender_out->length > 0;
+  strncpy(buffer, sender, buffer_size - 1);
+  buffer[buffer_size - 1] = '\0';
+  string_strip_trailing_whitespace(buffer, buffer);
+  char *start = (char *)string_strip_leading_whitespace(buffer);
+
+  if (from_title) {
+    // "Conversation: Sender" titles group by the conversation
+    char *separator = strstr(start, ": ");
+    if (separator && (separator != start) && (separator[2] != '\0')) {
+      *separator = '\0';
+      string_strip_trailing_whitespace(start, start);
+    }
+  }
+
+  return IS_EMPTY_STRING(start) ? NULL : start;
 }
 
-static NotificationHistoryRow *prv_find_group(NotificationHistory *history,
-                                              const StringRange *sender) {
+static NotificationHistoryRow *prv_find_group(NotificationHistory *history, const char *sender) {
   NotificationHistoryRow *row = history->rows;
   while (row) {
-    if (row->is_group && strlen(row->group.sender) == sender->length &&
-        memcmp(row->group.sender, sender->start, sender->length) == 0) {
+    if (row->is_group && (strcmp(row->group.sender, sender) == 0)) {
       return row;
     }
     row = (NotificationHistoryRow *)list_get_next(&row->node);
@@ -122,14 +82,20 @@ static void prv_insert_row_sorted(NotificationHistory *history, NotificationHist
                                                             prv_row_comparator, false);
 }
 
+static NotificationHistoryEntry prv_make_entry(NotificationHistory *history,
+                                               const CommonTimelineItemHeader *header) {
+  return (NotificationHistoryEntry){
+    .id = header->id,
+    .timestamp = header->timestamp,
+    .sequence = history->next_sequence++,
+  };
+}
+
 static NotificationHistoryRow *prv_create_individual_row(NotificationHistory *history,
                                                          const CommonTimelineItemHeader *header) {
   NotificationHistoryRow *row = app_malloc_check(sizeof(*row));
   *row = (NotificationHistoryRow){
-    .is_group = false,
-    .timestamp = header->timestamp,
-    .sequence = history->next_sequence++,
-    .notification_id = header->id,
+    .notification = prv_make_entry(history, header),
   };
   list_init(&row->node);
   return row;
@@ -139,25 +105,22 @@ static NotificationHistoryMember *prv_create_member(NotificationHistory *history
                                                     const CommonTimelineItemHeader *header) {
   NotificationHistoryMember *member = app_malloc_check(sizeof(*member));
   *member = (NotificationHistoryMember){
-    .id = header->id,
-    .timestamp = header->timestamp,
-    .sequence = history->next_sequence++,
+    .entry = prv_make_entry(history, header),
   };
   list_init(&member->node);
   return member;
 }
 
-static NotificationHistoryRow *prv_create_group(NotificationHistory *history,
-                                                const StringRange *sender) {
+static NotificationHistoryRow *prv_create_group(const char *sender) {
   NotificationHistoryRow *row = app_malloc_check(sizeof(*row));
   *row = (NotificationHistoryRow){
     .is_group = true,
   };
   list_init(&row->node);
 
-  row->group.sender = app_malloc_check(sender->length + 1);
-  memcpy(row->group.sender, sender->start, sender->length);
-  row->group.sender[sender->length] = '\0';
+  const size_t sender_size = strlen(sender) + 1;
+  row->group.sender = app_malloc_check(sender_size);
+  memcpy(row->group.sender, sender, sender_size);
   return row;
 }
 
@@ -206,20 +169,19 @@ void notifications_history_add_header(NotificationHistory *history,
 }
 
 void notifications_history_add_item(NotificationHistory *history, const TimelineItem *item) {
-  if (!history->group_by_sender || item->header.timestamp < history->grouping_cutoff) {
+  char buffer[ATTRIBUTE_TITLE_MAX_LEN + 1];
+  const char *sender = NULL;
+  if (history->group_by_sender && (item->header.timestamp >= history->grouping_cutoff)) {
+    sender = prv_group_sender_for_item(item, buffer, sizeof(buffer));
+  }
+  if (!sender) {
     notifications_history_add_header(history, &item->header);
     return;
   }
 
-  StringRange sender;
-  if (!prv_group_sender_for_item(item, &sender)) {
-    notifications_history_add_header(history, &item->header);
-    return;
-  }
-
-  NotificationHistoryRow *row = prv_find_group(history, &sender);
+  NotificationHistoryRow *row = prv_find_group(history, sender);
   if (!row) {
-    row = prv_create_group(history, &sender);
+    row = prv_create_group(sender);
   } else {
     list_remove(&row->node, (ListNode **)&history->rows, NULL);
   }
@@ -228,8 +190,6 @@ void notifications_history_add_item(NotificationHistory *history, const Timeline
   row->group.members = (NotificationHistoryMember *)list_sorted_add(
       (ListNode *)row->group.members, &member->node, prv_member_comparator, false);
   row->group.count++;
-  row->timestamp = row->group.members->timestamp;
-  row->sequence = row->group.members->sequence;
   prv_insert_row_sorted(history, row);
 }
 
@@ -237,14 +197,14 @@ bool notifications_history_remove(NotificationHistory *history, const Uuid *id) 
   NotificationHistoryRow *row = history->rows;
   while (row) {
     if (!row->is_group) {
-      if (uuid_equal(&row->notification_id, id)) {
+      if (uuid_equal(&row->notification.id, id)) {
         list_remove(&row->node, (ListNode **)&history->rows, NULL);
         prv_free_row(row);
         return true;
       }
     } else {
       NotificationHistoryMember *member = row->group.members;
-      while (member && !uuid_equal(&member->id, id)) {
+      while (member && !uuid_equal(&member->entry.id, id)) {
         member = (NotificationHistoryMember *)list_get_next(&member->node);
       }
       if (member) {
@@ -258,8 +218,6 @@ bool notifications_history_remove(NotificationHistory *history, const Uuid *id) 
           prv_free_row(row);
         } else if (removed_latest) {
           list_remove(&row->node, (ListNode **)&history->rows, NULL);
-          row->timestamp = row->group.members->timestamp;
-          row->sequence = row->group.members->sequence;
           prv_insert_row_sorted(history, row);
         }
         return true;
@@ -291,16 +249,9 @@ bool notifications_history_has_collapsed_groups(const NotificationHistory *histo
 }
 
 bool notifications_history_row_is_collapsed_group(const NotificationHistoryRow *row) {
-  return row->is_group && row->group.count > 1;
+  return row->is_group && (row->group.count > 1);
 }
 
 const Uuid *notifications_history_row_get_latest_id(const NotificationHistoryRow *row) {
-  if (row->is_group) {
-    return row->group.members ? &row->group.members->id : NULL;
-  }
-  return &row->notification_id;
-}
-
-uint16_t notifications_history_row_get_count(const NotificationHistoryRow *row) {
-  return row->is_group ? row->group.count : 1;
+  return &prv_row_entry(row)->id;
 }
