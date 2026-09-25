@@ -305,6 +305,11 @@ pbl_clar_test(test_app_cache
   OVERRIDES dummy_board
 )
 
+pbl_clar_test(test_app_order_endpoint
+  SOURCES
+    src/fw/services/app_order_endpoint/service.c
+)
+
 pbl_clar_test(test_launcher_folder_storage
   SOURCES
     src/fw/applib/graphics/utf8.c
