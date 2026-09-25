@@ -4,6 +4,7 @@
 set(sources
   app_order_storage.c
   app_storage.c
+  launcher_folder_storage.c
   process_commands.c
   process_loader_storage.c
 )

@@ -24,6 +24,7 @@
 #include "pbl/services/persist.h"
 #include "pbl/services/phone_call.h"
 #include "pbl/services/process_management/app_order_storage.h"
+#include "pbl/services/process_management/launcher_folder_storage.h"
 #include "pbl/services/send_text_service.h"
 #include "pbl/services/speaker/speaker_service.h"
 #include "pbl/services/stationary.h"
@@ -95,6 +96,7 @@ void services_normal_init(void) {
   wakeup_init();
 
   app_order_storage_init();
+  launcher_folder_storage_init();
 
   // Check if time is valid before initializing activity
   if (prv_is_time_valid_for_activity_init()) {
