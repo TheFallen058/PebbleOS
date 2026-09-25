@@ -310,6 +310,22 @@ pbl_clar_test(test_app_cache
   OVERRIDES dummy_board
 )
 
+pbl_clar_test(test_launcher_folder_storage
+  SOURCES
+    src/fw/applib/graphics/utf8.c
+    src/fw/drivers/flash/flash_crc.c
+    src/fw/flash_region/filesystem_regions.c
+    src/fw/flash_region/flash_region.c
+    src/fw/services/filesystem/flash_translation.c
+    src/fw/services/filesystem/pfs.c
+    src/fw/services/process_management/launcher_folder_storage.c
+    src/fw/util/crc8.c
+    src/fw/util/legacy_checksum.c
+    tests/fakes/fake_rtc.c
+    tests/fakes/fake_spi_flash.c
+  OVERRIDES dummy_board
+)
+
 pbl_clar_test(test_app_install_manager
   SOURCES
     src/fw/flash_region/flash_region.c
