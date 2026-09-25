@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include "app_glance.h"
 #include "app_glance_service.h"
+#include "launcher_layout.h"
 
 #include "applib/preferred_content_size.h"
 #include "process_management/app_menu_data_source.h"
@@ -22,6 +24,10 @@ typedef struct LauncherMenuLayerStyle {
 #endif
 } LauncherMenuLayerStyle;
 
+//! Called when the user selects a folder row. The launcher app pushes the folder's window; the
+//! menu layer itself stays out of window management so it can be reused for that window.
+typedef void (*LauncherMenuLayerFolderSelectedHandler)(LauncherFolderId folder_id, void *context);
+
 typedef struct LauncherMenuLayer {
   Layer container_layer;
   MenuLayer menu_layer;
@@ -30,8 +36,15 @@ typedef struct LauncherMenuLayer {
   Layer down_arrow_layer;
 #endif
   PreferredContentSize content_size;
-  AppMenuDataSource *data_source;
+  LauncherLayout *layout;
+  //! LAUNCHER_FOLDER_ID_ROOT for the launcher root, otherwise the folder being shown.
+  LauncherFolderId folder_id;
   LauncherAppGlanceService glance_service;
+  //! Lazily created the first time a folder row is drawn; folders are not apps and so are not
+  //! cached per UUID by the glance service.
+  LauncherAppGlance *folder_glance;
+  LauncherMenuLayerFolderSelectedHandler folder_selected;
+  void *folder_selected_context;
   bool selection_animations_enabled;
   AppInstallId app_to_launch_after_next_render;
 } LauncherMenuLayer;
@@ -46,8 +59,13 @@ typedef struct LauncherMenuLayerSelectionState {
 //! @return The style for the user's preferred content size
 const LauncherMenuLayerStyle *launcher_menu_layer_get_style(void);
 
-void launcher_menu_layer_init(LauncherMenuLayer *launcher_menu_layer,
-                              AppMenuDataSource *data_source);
+//! @param folder_id LAUNCHER_FOLDER_ID_ROOT to show the launcher root, otherwise a folder.
+void launcher_menu_layer_init(LauncherMenuLayer *launcher_menu_layer, LauncherLayout *layout,
+                              LauncherFolderId folder_id);
+
+void launcher_menu_layer_set_folder_selected_handler(
+    LauncherMenuLayer *launcher_menu_layer, LauncherMenuLayerFolderSelectedHandler handler,
+    void *context);
 
 Layer *launcher_menu_layer_get_layer(LauncherMenuLayer *launcher_menu_layer);
 

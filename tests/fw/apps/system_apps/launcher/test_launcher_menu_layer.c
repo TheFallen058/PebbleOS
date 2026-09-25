@@ -5,6 +5,7 @@
 
 #include "applib/ui/vibes.h"
 #include "applib/ui/window_private.h"
+#include "apps/system/launcher/default/launcher_layout.h"
 #include "apps/system/launcher/default/menu_layer.h"
 #include "shell/prefs.h"
 #include "resource/resource_ids.auto.h"
@@ -319,8 +320,11 @@ void prv_render_launcher_menu_layer(uint16_t selected_index) {
   app_menu_data_source_init(&data_source, NULL, NULL);
   app_menu_data_source_enable_icons(&data_source, RESOURCE_ID_MENU_LAYER_GENERIC_WATCHAPP_ICON);
 
+  LauncherLayout layout = {};
+  launcher_layout_init(&layout, &data_source);
+
   LauncherMenuLayer launcher_menu_layer = {};
-  launcher_menu_layer_init(&launcher_menu_layer, &data_source);
+  launcher_menu_layer_init(&launcher_menu_layer, &layout, LAUNCHER_FOLDER_ID_ROOT);
   const bool animated = false;
   // If we used MenuRowAlignCenter on rect then the test images would show the top and bottom
   // rows being clipped by the edge of the screen
@@ -331,7 +335,111 @@ void prv_render_launcher_menu_layer(uint16_t selected_index) {
   layer_render_tree(launcher_menu_layer_get_layer(&launcher_menu_layer), &s_ctx);
 
   launcher_menu_layer_deinit(&launcher_menu_layer);
+  launcher_layout_deinit(&layout);
   app_menu_data_source_deinit(&data_source);
+}
+
+// Folders
+//////////////////////
+
+//! Declared PBL_T_STATIC in menu_layer.c so the select handler can be driven from here.
+void prv_menu_layer_select(MenuLayer *menu_layer, MenuIndex *cell_index, void *context);
+
+//! Puts the two middle apps into a folder and renders whichever list the caller asks for.
+static void prv_store_folder_config(void) {
+  uint8_t bytes[sizeof(LauncherFolderConfig) + sizeof(LauncherFolderRecord) + (2 * sizeof(Uuid))];
+  memset(bytes, 0, sizeof(bytes));
+
+  LauncherFolderConfig *config = (LauncherFolderConfig *)bytes;
+  config->version = LAUNCHER_FOLDER_STORAGE_VERSION;
+  config->folder_count = 1;
+  config->data_size = sizeof(bytes) - sizeof(*config);
+
+  LauncherFolderRecord *record = (LauncherFolderRecord *)config->data;
+  record->folder_id = 1;
+  record->member_count = 2;
+  strcpy(record->name, "Utilities");
+  Uuid *members = (Uuid *)((uint8_t *)record + sizeof(*record));
+  members[0] = s_fake_app_nodes[LauncherMenuLayerTestApp_LongTitle].node.uuid;
+  members[1] = s_fake_app_nodes[LauncherMenuLayerTestApp_InteriorApp].node.uuid;
+
+  cl_assert(launcher_folder_storage_write(bytes, sizeof(bytes)));
+}
+
+static void prv_render_folder_launcher(LauncherFolderId folder_id, uint16_t selected_index,
+                                       LauncherMenuLayerFolderSelectedHandler handler,
+                                       void *handler_context) {
+  prv_store_folder_config();
+
+  AppMenuDataSource data_source = {};
+  app_menu_data_source_init(&data_source, NULL, NULL);
+  app_menu_data_source_enable_icons(&data_source, RESOURCE_ID_MENU_LAYER_GENERIC_WATCHAPP_ICON);
+
+  LauncherLayout layout = {};
+  launcher_layout_init(&layout, &data_source);
+
+  LauncherMenuLayer launcher_menu_layer = {};
+  launcher_menu_layer_init(&launcher_menu_layer, &layout, folder_id);
+  launcher_menu_layer_set_folder_selected_handler(&launcher_menu_layer, handler, handler_context);
+
+  const MenuRowAlign row_align = PBL_IF_RECT_ELSE(MenuRowAlignTop, MenuRowAlignCenter);
+  prv_launcher_menu_layer_set_selection_index(&launcher_menu_layer, selected_index, row_align,
+                                              false /* animated */);
+
+  if (handler) {
+    MenuIndex index = MenuIndex(0, selected_index);
+    prv_menu_layer_select(&launcher_menu_layer.menu_layer, &index, &launcher_menu_layer);
+  }
+
+  layer_render_tree(launcher_menu_layer_get_layer(&launcher_menu_layer), &s_ctx);
+
+  launcher_menu_layer_deinit(&launcher_menu_layer);
+  launcher_layout_deinit(&layout);
+  app_menu_data_source_deinit(&data_source);
+}
+
+static LauncherFolderId s_selected_folder_id;
+static int s_folder_selected_count;
+
+static void prv_folder_selected(LauncherFolderId folder_id, void *context) {
+  s_selected_folder_id = folder_id;
+  s_folder_selected_count++;
+  cl_assert_equal_p(context, &s_folder_selected_count);
+}
+
+void test_launcher_menu_layer__folder_row(void) {
+  // Watchfaces, Utilities >, Travel, No Icon
+  prv_render_folder_launcher(LAUNCHER_FOLDER_ID_ROOT, 1, NULL, NULL);
+  cl_check(gbitmap_pbi_eq(&s_ctx.dest_bitmap, TEST_PBI_FILE));
+}
+
+void test_launcher_menu_layer__folder_contents(void) {
+  prv_render_folder_launcher(1, 0, NULL, NULL);
+  cl_check(gbitmap_pbi_eq(&s_ctx.dest_bitmap, TEST_PBI_FILE));
+}
+
+void test_launcher_menu_layer__selecting_a_folder_notifies_the_handler(void) {
+  s_selected_folder_id = LAUNCHER_FOLDER_ID_ROOT;
+  s_folder_selected_count = 0;
+
+  prv_render_folder_launcher(LAUNCHER_FOLDER_ID_ROOT, 1, prv_folder_selected,
+                             &s_folder_selected_count);
+
+  cl_assert_equal_i(s_folder_selected_count, 1);
+  cl_assert_equal_i(s_selected_folder_id, 1);
+}
+
+void test_launcher_menu_layer__selecting_an_app_does_not_notify_the_handler(void) {
+  s_selected_folder_id = LAUNCHER_FOLDER_ID_ROOT;
+  s_folder_selected_count = 0;
+
+  // Row 0 of the root is still an app, and row 0 inside the folder is too.
+  prv_render_folder_launcher(LAUNCHER_FOLDER_ID_ROOT, 0, prv_folder_selected,
+                             &s_folder_selected_count);
+  cl_assert_equal_i(s_folder_selected_count, 0);
+
+  prv_render_folder_launcher(1, 0, prv_folder_selected, &s_folder_selected_count);
+  cl_assert_equal_i(s_folder_selected_count, 0);
 }
 
 // Tests
@@ -430,8 +538,11 @@ void test_launcher_menu_layer__content_size_change_keeps_selection(void) {
   app_menu_data_source_init(&data_source, NULL, NULL);
   app_menu_data_source_enable_icons(&data_source, RESOURCE_ID_MENU_LAYER_GENERIC_WATCHAPP_ICON);
 
+  LauncherLayout layout = {};
+  launcher_layout_init(&layout, &data_source);
+
   LauncherMenuLayer launcher_menu_layer = {};
-  launcher_menu_layer_init(&launcher_menu_layer, &data_source);
+  launcher_menu_layer_init(&launcher_menu_layer, &layout, LAUNCHER_FOLDER_ID_ROOT);
   cl_assert_equal_i(launcher_menu_layer.content_size, PreferredContentSizeDefault);
 
   const uint16_t selected_row = LauncherMenuLayerTestApp_NoIcon;
@@ -467,6 +578,7 @@ void test_launcher_menu_layer__content_size_change_keeps_selection(void) {
   cl_assert(selection_range.origin_y + selection_range.size_h <= DISP_ROWS);
 
   launcher_menu_layer_deinit(&launcher_menu_layer);
+  launcher_layout_deinit(&layout);
   app_menu_data_source_deinit(&data_source);
 }
 

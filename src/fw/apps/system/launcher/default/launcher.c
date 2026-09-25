@@ -3,6 +3,8 @@
 
 #include "launcher.h"
 
+#include "folder_window.h"
+#include "launcher_layout.h"
 #include "menu_layer.h"
 
 #include "applib/app.h"
@@ -20,6 +22,7 @@ typedef struct LauncherAppWindowData {
   Window window;
   LauncherMenuLayer launcher_menu_layer;
   AppMenuDataSource app_menu_data_source;
+  LauncherLayout layout;
   EventServiceInfo pref_change_event_info;
 } LauncherAppWindowData;
 
@@ -64,7 +67,14 @@ static bool prv_app_filter_callback(PBL_UNUSED AppMenuDataSource *source, AppIns
 
 static void prv_data_changed(void *context) {
   LauncherAppWindowData *data = context;
+  launcher_layout_reload(&data->layout);
   launcher_menu_layer_reload_data(&data->launcher_menu_layer);
+  launcher_folder_window_handle_apps_changed();
+}
+
+static void prv_folder_selected(LauncherFolderId folder_id, void *context) {
+  LauncherAppWindowData *data = context;
+  launcher_folder_window_push(&data->layout, folder_id);
 }
 
 //! We're not 100% sure of the order of the launcher list yet, so use this function to transform
@@ -97,8 +107,11 @@ static void prv_window_load(Window *window) {
                             },
                             data);
 
+  launcher_layout_init(&data->layout, data_source);
+
   LauncherMenuLayer *launcher_menu_layer = &data->launcher_menu_layer;
-  launcher_menu_layer_init(launcher_menu_layer, data_source);
+  launcher_menu_layer_init(launcher_menu_layer, &data->layout, LAUNCHER_FOLDER_ID_ROOT);
+  launcher_menu_layer_set_folder_selected_handler(launcher_menu_layer, prv_folder_selected, data);
   launcher_menu_layer_set_click_config_onto_window(launcher_menu_layer, window);
   layer_add_child(window_root_layer, launcher_menu_layer_get_layer(launcher_menu_layer));
 
@@ -142,6 +155,7 @@ static void prv_window_unload(Window *window) {
   event_service_client_unsubscribe(&data->pref_change_event_info);
   app_focus_service_unsubscribe();
   launcher_menu_layer_deinit(&data->launcher_menu_layer);
+  launcher_layout_deinit(&data->layout);
   app_menu_data_source_deinit(&data->app_menu_data_source);
 }
 
