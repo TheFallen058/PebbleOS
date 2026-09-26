@@ -26,6 +26,7 @@ jobs:
               - 'boards/**'
               - 'platform/**'
               - 'resources/**'
+              - 'soc/**'
               - 'src/**'
               - 'tools/**'
               - 'third_party/**'
@@ -39,7 +40,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     container:
-      image: ghcr.io/coredevices/pebbleos-docker:v7
+      image: ghcr.io/coredevices/pebbleos-docker:v8
 
     strategy:
       matrix:
