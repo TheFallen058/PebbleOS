@@ -1,6 +1,23 @@
 # SPDX-FileCopyrightText: 2026 Core Devices LLC
 # SPDX-License-Identifier: Apache-2.0
 
+pbl_clar_test(test_launcher_layout
+  SOURCES
+    src/fw/applib/graphics/utf8.c
+    src/fw/apps/system/launcher/default/launcher_layout.c
+    src/fw/drivers/flash/flash_crc.c
+    src/fw/flash_region/filesystem_regions.c
+    src/fw/flash_region/flash_region.c
+    src/fw/services/filesystem/flash_translation.c
+    src/fw/services/filesystem/pfs.c
+    src/fw/services/process_management/launcher_folder_storage.c
+    src/fw/util/crc8.c
+    src/fw/util/legacy_checksum.c
+    tests/fakes/fake_rtc.c
+    tests/fakes/fake_spi_flash.c
+  OVERRIDES dummy_board
+)
+
 pbl_clar_test(test_launcher_menu_layer
   SOURCES
     src/fw/applib/fonts/codepoint.c
@@ -71,6 +88,7 @@ pbl_clar_test(test_launcher_menu_layer
     src/fw/applib/vendor/uPNG/upng.c
     src/fw/apps/system/launcher/default/app_glance.c
     src/fw/apps/system/launcher/default/app_glance_alarms.c
+    src/fw/apps/system/launcher/default/app_glance_folder.c
     src/fw/apps/system/launcher/default/app_glance_generic.c
     src/fw/apps/system/launcher/default/app_glance_music.c
     src/fw/apps/system/launcher/default/app_glance_notifications.c
@@ -81,8 +99,10 @@ pbl_clar_test(test_launcher_menu_layer
     src/fw/apps/system/launcher/default/app_glance_watchfaces.c
     src/fw/apps/system/launcher/default/app_glance_weather.c
     src/fw/apps/system/launcher/default/app_glance_workout.c
+    src/fw/apps/system/launcher/default/launcher_layout.c
     src/fw/apps/system/launcher/default/menu_layer.c
     src/fw/apps/system/timeline/text_node.c
+    src/fw/services/process_management/launcher_folder_storage.c
     src/fw/board/displays/display_getafix.c
     src/fw/services/app_glances/app_glance_service.c
     src/fw/services/blob_db/app_glance_db.c
