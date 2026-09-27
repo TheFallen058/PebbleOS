@@ -11,7 +11,7 @@
 //! Glance for a launcher folder row. Folders have no UUID and no app glance slices, so unlike
 //! app glances this one is not cached per app by \ref LauncherAppGlanceService. The launcher
 //! menu layer keeps a single instance and retargets it at the folder it is about to draw.
-//! @param fallback_icon Icon to draw for folders; owned by the caller.
+//! @param fallback_icon Used if the folder icon resource cannot be loaded; owned by the caller.
 LauncherAppGlance *launcher_app_glance_folder_create(const KinoReel *fallback_icon);
 
 //! Points the glance at the folder that is about to be drawn.
