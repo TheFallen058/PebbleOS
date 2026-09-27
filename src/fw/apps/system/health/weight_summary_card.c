@@ -22,6 +22,18 @@
 #define CARD_VALUE_COLOR      PBL_IF_COLOR_ELSE(GColorDarkGreen, GColorBlack)
 #define CARD_METADATA_COLOR   PBL_IF_COLOR_ELSE(GColorMidnightGreen, GColorBlack)
 
+#if DISP_ROWS <= LEGACY_2X_DISP_ROWS
+#define WEIGHT_ICON_Y      2
+#define WEIGHT_VALUE_Y     88
+#define WEIGHT_SUBTITLE_Y  136
+#define WEIGHT_VALUE_FONT  FONT_KEY_LECO_26_BOLD_NUMBERS_AM_PM
+#else
+#define WEIGHT_ICON_Y      (12 + HEALTH_Y_OFFSET)
+#define WEIGHT_VALUE_Y     (101 + HEALTH_Y_OFFSET)
+#define WEIGHT_SUBTITLE_Y  (151 + HEALTH_Y_OFFSET)
+#define WEIGHT_VALUE_FONT  FONT_KEY_LECO_32_BOLD_NUMBERS
+#endif
+
 typedef struct {
   HealthData *health_data;
 } WeightSummaryData;
@@ -29,10 +41,10 @@ typedef struct {
 static void prv_draw_scale_icon(GContext *ctx, const GRect *bounds) {
   graphics_context_set_stroke_color(ctx, CARD_ICON_COLOR);
   graphics_context_set_stroke_width(ctx, 10);
-  const GRect frame = GRect((bounds->size.w - 84) / 2, 12 + HEALTH_Y_OFFSET, 84, 84);
+  const GRect frame = GRect((bounds->size.w - 84) / 2, WEIGHT_ICON_Y, 84, 84);
   graphics_draw_round_rect(ctx, &frame, 22);
 
-  const GRect dial = GRect((bounds->size.w - 38) / 2, 36 + HEALTH_Y_OFFSET, 38, 22);
+  const GRect dial = GRect((bounds->size.w - 38) / 2, WEIGHT_ICON_Y + 24, 38, 22);
   graphics_context_set_stroke_width(ctx, 3);
   graphics_draw_round_rect(ctx, &dial, 5);
 
@@ -61,7 +73,7 @@ static void prv_draw_value(GContext *ctx, Layer *layer, WeightSummaryData *data)
   char value[16];
   health_util_format_weight(value, sizeof(value), weight_dag);
   const char *unit = i18n_get(health_util_get_weight_unit(), layer);
-  GFont value_font = fonts_get_system_font(FONT_KEY_LECO_32_BOLD_NUMBERS);
+  GFont value_font = fonts_get_system_font(WEIGHT_VALUE_FONT);
   GFont unit_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
   const GRect measure_frame = GRect(0, 0, layer->bounds.size.w, 48);
   const int16_t value_width =
@@ -75,13 +87,14 @@ static void prv_draw_value(GContext *ctx, Layer *layer, WeightSummaryData *data)
                                                 GTextAlignmentLeft)
           .w;
   const int16_t spacing = 4;
-  const int16_t value_x = (layer->bounds.size.w - value_width) / 2;
-  GRect value_frame = GRect(value_x, 101 + HEALTH_Y_OFFSET, value_width, 48);
+  const int16_t group_width = value_width + spacing + unit_width;
+  const int16_t value_x = (layer->bounds.size.w - group_width) / 2;
+  GRect value_frame = GRect(value_x, WEIGHT_VALUE_Y, value_width, 48);
   graphics_context_set_text_color(ctx, CARD_VALUE_COLOR);
   graphics_draw_text(ctx, value, value_font, value_frame, GTextOverflowModeTrailingEllipsis,
                      GTextAlignmentLeft, NULL);
   GRect unit_frame =
-      GRect(value_x + value_width + spacing, 115 + HEALTH_Y_OFFSET, unit_width, 24);
+      GRect(value_x + value_width + spacing, WEIGHT_VALUE_Y + 14, unit_width, 24);
   graphics_context_set_text_color(ctx, CARD_METADATA_COLOR);
   graphics_draw_text(ctx, unit, unit_font, unit_frame, GTextOverflowModeTrailingEllipsis,
                      GTextAlignmentLeft, NULL);
@@ -105,7 +118,7 @@ static void prv_draw_value(GContext *ctx, Layer *layer, WeightSummaryData *data)
   } else {
     subtitle_text = i18n_get("PROFILE WEIGHT", layer);
   }
-  GRect subtitle_frame = GRect(8, 151 + HEALTH_Y_OFFSET, layer->bounds.size.w - 16, 34);
+  GRect subtitle_frame = GRect(8, WEIGHT_SUBTITLE_Y, layer->bounds.size.w - 16, 32);
   graphics_draw_text(ctx, subtitle_text, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
                      subtitle_frame,
                      GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);

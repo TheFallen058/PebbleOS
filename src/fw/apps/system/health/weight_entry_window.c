@@ -26,9 +26,8 @@
 #define ENTRY_BACKGROUND_COLOR PBL_IF_COLOR_ELSE(GColorCeleste, GColorWhite)
 
 #ifdef CONFIG_TOUCH
-#define TOUCH_PIXELS_PER_STEP (18)
-#define TOUCH_TAP_SLOP        (12)
-#define TOUCH_BACK_THRESHOLD  (40)
+#define TOUCH_TAP_SLOP       (12)
+#define TOUCH_BACK_THRESHOLD (40)
 #endif
 
 typedef struct {
@@ -101,12 +100,6 @@ static int16_t prv_abs(int16_t value) {
   return value < 0 ? -value : value;
 }
 
-static int32_t prv_touch_steps(int16_t delta_y) {
-  const int16_t half_step = TOUCH_PIXELS_PER_STEP / 2;
-  return delta_y >= 0 ? (delta_y + half_step) / TOUCH_PIXELS_PER_STEP
-                      : (delta_y - half_step) / TOUCH_PIXELS_PER_STEP;
-}
-
 static void prv_touch_set_value(WeightEntryWindow *entry_window, int32_t value) {
   value = CLIP(value, entry_window->min_tenths, entry_window->max_tenths);
   if (value != entry_window->value_tenths) {
@@ -137,8 +130,9 @@ static void prv_touch_handler(const TouchEvent *event, void *context) {
   const int16_t delta_x = event->x - entry_window->touch_start_x;
   const int16_t delta_y = event->y - entry_window->touch_start_y;
   if (event->type == TouchEvent_PositionUpdate && !entry_window->touch_on_action_bar) {
-    prv_touch_set_value(entry_window,
-                        entry_window->touch_start_value + prv_touch_steps(-delta_y));
+    prv_touch_set_value(
+        entry_window,
+        health_weight_entry_value_from_drag(entry_window->touch_start_value, delta_y));
     return;
   }
 
@@ -162,8 +156,9 @@ static void prv_touch_handler(const TouchEvent *event, void *context) {
              delta_x > TOUCH_BACK_THRESHOLD && prv_abs(delta_x) > prv_abs(delta_y)) {
     app_window_stack_remove(&entry_window->window, true);
   } else if (!entry_window->touch_on_action_bar) {
-    prv_touch_set_value(entry_window,
-                        entry_window->touch_start_value + prv_touch_steps(-delta_y));
+    prv_touch_set_value(
+        entry_window,
+        health_weight_entry_value_from_drag(entry_window->touch_start_value, delta_y));
   }
 }
 
