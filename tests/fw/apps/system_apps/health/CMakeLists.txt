@@ -110,8 +110,7 @@ pbl_clar_test(test_health_card_view
   TEST_IMAGES
 )
 
-pbl_clar_test(test_health_activity_summary_card
-  SOURCES
+set(HEALTH_ACTIVITY_SUMMARY_CARD_SOURCES
     src/fw/applib/fonts/codepoint.c
     src/fw/applib/graphics/@BITDEPTH@_bit/framebuffer.c
     src/fw/applib/graphics/@BITDEPTH@_bit/bitblt_private.c
@@ -209,7 +208,19 @@ pbl_clar_test(test_health_activity_summary_card
     src/fw/apps/system/health/weight_detail_card.c
     src/fw/apps/system/health/weight_entry_ui.c
     src/fw/apps/system/health/weight_summary_card.c
+)
+
+pbl_clar_test(test_health_activity_summary_card
+  SOURCES ${HEALTH_ACTIVITY_SUMMARY_CARD_SOURCES}
   PLATFORMS obelix gabbro
+  DEFINES USE_DISPLAY_PERIMETER_ON_FONT_LAYOUT=1
+  OVERRIDES dummy_board
+  TEST_IMAGES
+)
+
+pbl_clar_test(test_health_weight_card
+  SOURCES ${HEALTH_ACTIVITY_SUMMARY_CARD_SOURCES}
+  PLATFORMS asterix
   DEFINES USE_DISPLAY_PERIMETER_ON_FONT_LAYOUT=1
   OVERRIDES dummy_board
   TEST_IMAGES

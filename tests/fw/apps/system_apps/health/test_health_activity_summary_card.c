@@ -209,18 +209,16 @@ void test_health_activity_summary_card__weight_detail_empty(void) {
 }
 
 void test_health_activity_summary_card__weight_history(void) {
+  shell_prefs_set_units_distance(UnitsDistance_KM);
   HealthData health_data = {
-    .profile_weight_dag = 7730,
+    .profile_weight_dag = 7620,
     .weight_samples = {
-      {.utc_sec = 1704557975, .weight_dag = 7700},
-      {.utc_sec = 1704385175, .weight_dag = 7685},
-      {.utc_sec = 1704212375, .weight_dag = 7690},
-      {.utc_sec = 1703953175, .weight_dag = 7680},
-      {.utc_sec = 1703693975, .weight_dag = 7720},
-      {.utc_sec = 1702829975, .weight_dag = 7710},
-      {.utc_sec = 1702052375, .weight_dag = 7740},
+      {.utc_sec = 1790119380, .weight_dag = 7620},
+      {.utc_sec = 1789892100, .weight_dag = 7590},
+      {.utc_sec = 1789767600, .weight_dag = 7680},
+      {.utc_sec = 1789455900, .weight_dag = 7640},
     },
-    .weight_sample_count = 7,
+    .weight_sample_count = 4,
   };
   prv_create_weight_detail_and_render(&health_data);
   cl_check(gbitmap_pbi_eq(&s_ctx.dest_bitmap, TEST_PBI_FILE));

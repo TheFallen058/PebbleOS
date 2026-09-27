@@ -18,9 +18,30 @@
 #define ENTRY_METADATA_COLOR   PBL_IF_COLOR_ELSE(GColorMidnightGreen, GColorBlack)
 #define ENTRY_NEIGHBOR_COLOR   PBL_IF_COLOR_ELSE(GColorCadetBlue, GColorDarkGray)
 
+#if DISP_ROWS <= LEGACY_2X_DISP_ROWS
+#define ENTRY_TITLE_Y   4
+#define ENTRY_TOP_Y     32
+#define ENTRY_CURRENT_Y 68
+#define ENTRY_BOTTOM_Y  120
+#else
+#define ENTRY_TITLE_Y   (16 + HEALTH_Y_OFFSET / 3)
+#define ENTRY_TOP_Y     (30 + HEALTH_Y_OFFSET)
+#define ENTRY_CURRENT_Y (72 + HEALTH_Y_OFFSET)
+#define ENTRY_BOTTOM_Y  (124 + HEALTH_Y_OFFSET)
+#endif
+
+#define TOUCH_PIXELS_PER_STEP 18
+
 static void prv_format_value(char *buffer, size_t buffer_size, int32_t value_tenths) {
   snprintf(buffer, buffer_size, "%" PRId32 ".%" PRId32, value_tenths / 10,
            value_tenths % 10);
+}
+
+int32_t health_weight_entry_value_from_drag(int32_t start_value, int16_t delta_y) {
+  const int16_t half_step = TOUCH_PIXELS_PER_STEP / 2;
+  const int32_t steps = delta_y >= 0 ? (delta_y + half_step) / TOUCH_PIXELS_PER_STEP
+                                     : (delta_y - half_step) / TOUCH_PIXELS_PER_STEP;
+  return start_value + steps;
 }
 
 static void prv_draw_current_value(GContext *ctx, const GRect *content_bounds,
@@ -41,13 +62,16 @@ static void prv_draw_current_value(GContext *ctx, const GRect *content_bounds,
                                                 GTextOverflowModeTrailingEllipsis,
                                                 GTextAlignmentLeft)
           .w;
-  const int16_t value_x = content_bounds->origin.x + (content_bounds->size.w - value_width) / 2;
+  const int16_t spacing = 4;
+  const int16_t group_width = value_width + spacing + unit_width;
+  const int16_t value_x =
+      content_bounds->origin.x + (content_bounds->size.w - group_width) / 2;
   graphics_context_set_text_color(ctx, ENTRY_VALUE_COLOR);
   graphics_draw_text(ctx, value, value_font, GRect(value_x, y, value_width, 48),
                      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
   graphics_context_set_text_color(ctx, ENTRY_METADATA_COLOR);
   graphics_draw_text(ctx, unit, unit_font,
-                     GRect(value_x + value_width + 4, y + 16, unit_width, 24),
+                     GRect(value_x + value_width + spacing, y + 16, unit_width, 24),
                      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
 }
 
@@ -58,20 +82,20 @@ void health_weight_entry_ui_draw(GContext *ctx, const GRect *bounds, int32_t val
   graphics_fill_rect(ctx, bounds);
 
   const GRect content_bounds = GRect(0, 0, bounds->size.w - ACTION_BAR_WIDTH, bounds->size.h);
-  GRect frame = GRect(0, 16 + HEALTH_Y_OFFSET / 3, content_bounds.size.w, 30);
+  GRect frame = GRect(0, ENTRY_TITLE_Y, content_bounds.size.w, 30);
   graphics_context_set_text_color(ctx, ENTRY_METADATA_COLOR);
   graphics_draw_text(ctx, title, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD), frame,
                      GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 
   char neighbor[16];
-  frame.origin.y = 30 + HEALTH_Y_OFFSET;
+  frame.origin.y = ENTRY_TOP_Y;
   frame.size.h = 34;
   graphics_context_set_text_color(ctx, ENTRY_NEIGHBOR_COLOR);
   prv_format_value(neighbor, sizeof(neighbor), MIN(max_tenths, value_tenths + 1));
   graphics_draw_text(ctx, neighbor, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD), frame,
                      GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 
-  const int16_t current_y = 72 + HEALTH_Y_OFFSET;
+  const int16_t current_y = ENTRY_CURRENT_Y;
   const int16_t horizontal_inset = PBL_IF_ROUND_ELSE(22, 9);
   GRect selection_frame =
       GRect(horizontal_inset, current_y - 4, content_bounds.size.w - 2 * horizontal_inset, 54);
@@ -82,7 +106,7 @@ void health_weight_entry_ui_draw(GContext *ctx, const GRect *bounds, int32_t val
   graphics_draw_round_rect(ctx, &selection_frame, 10);
   prv_draw_current_value(ctx, &content_bounds, value_tenths, unit, value_font_key, current_y);
 
-  frame.origin.y = 124 + HEALTH_Y_OFFSET;
+  frame.origin.y = ENTRY_BOTTOM_Y;
   graphics_context_set_text_color(ctx, ENTRY_NEIGHBOR_COLOR);
   prv_format_value(neighbor, sizeof(neighbor), MAX(min_tenths, value_tenths - 1));
   graphics_draw_text(ctx, neighbor, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD), frame,

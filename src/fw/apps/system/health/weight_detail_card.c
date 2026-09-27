@@ -3,6 +3,7 @@
 
 #include "weight_detail_card.h"
 
+#include "progress.h"
 #include "weight_entry_window.h"
 
 #include "applib/fonts/fonts.h"
@@ -16,13 +17,18 @@
 #include "pbl/services/clock.h"
 #include "pbl/services/i18n/i18n.h"
 #include "pbl/util/math.h"
+#include "pbl/util/size.h"
 #include "resource/resource_ids.auto.h"
 
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
+#if PBL_RECT && DISP_COLS >= 200
+#define SUMMARY_ROW_HEIGHT 220
+#else
 #define SUMMARY_ROW_HEIGHT PBL_IF_ROUND_ELSE(200, 166)
+#endif
 #define SAMPLE_ROW_HEIGHT 40
 #define WEIGHT_DAY_SEC (24 * 60 * 60)
 #define WEIGHT_GRAPH_SHORT_DAYS 3
@@ -36,6 +42,10 @@ typedef struct {
   Layer *content_layer;
   HealthData *health_data;
   char delete_text[64];
+#if PBL_ROUND
+  Layer down_arrow_layer;
+  Layer up_arrow_layer;
+#endif
 } WeightDetailCard;
 
 typedef struct {
@@ -239,7 +249,118 @@ static void prv_draw_graph(GContext *ctx, const GRect *frame, WeightDetailCard *
   }
 }
 
+#if PBL_RECT && DISP_COLS >= 200
+static HealthProgressBarValue prv_weight_progress(int32_t value, int32_t min_value,
+                                                  int32_t max_value) {
+  return (value - min_value) * HEALTH_PROGRESS_BAR_MAX_VALUE / (max_value - min_value);
+}
+
+static void prv_draw_record_progress(GContext *ctx, const GRect *frame,
+                                     HealthProgressBarValue progress) {
+  HealthProgressSegment segments[] = {
+    {
+      .type = HealthProgressSegmentType_Corner,
+      .points = {
+        {frame->origin.x, frame->origin.y},
+        {frame->origin.x, grect_get_max_y(frame)},
+        {frame->origin.x, grect_get_max_y(frame)},
+        {frame->origin.x, frame->origin.y},
+      },
+    },
+    {
+      .type = HealthProgressSegmentType_Corner,
+      .points = {
+        {grect_get_max_x(frame), frame->origin.y},
+        {grect_get_max_x(frame), grect_get_max_y(frame)},
+        {grect_get_max_x(frame), grect_get_max_y(frame)},
+        {grect_get_max_x(frame), frame->origin.y},
+      },
+    },
+    {
+      .type = HealthProgressSegmentType_Horizontal,
+      .amount_of_total = HEALTH_PROGRESS_BAR_MAX_VALUE,
+      .points = {
+        {frame->origin.x, grect_get_max_y(frame)},
+        {grect_get_max_x(frame), grect_get_max_y(frame)},
+        {grect_get_max_x(frame), frame->origin.y},
+        {frame->origin.x, frame->origin.y},
+      },
+    },
+  };
+  HealthProgressBar progress_bar = {
+    .num_segments = ARRAY_LENGTH(segments),
+    .segments = segments,
+  };
+
+  health_progress_bar_fill(ctx, &progress_bar, GColorLightGray, 0,
+                           HEALTH_PROGRESS_BAR_MAX_VALUE);
+  health_progress_bar_fill(ctx, &progress_bar, GColorTiffanyBlue, 0, progress);
+  health_progress_bar_outline(ctx, &progress_bar, GColorBlack);
+}
+
+static void prv_draw_record_progress_rows(GContext *ctx, Layer *layer, WeightDetailCard *card) {
+  const ActivityWeightSample *samples;
+  const size_t sample_count = health_data_weight_get_samples(card->health_data, &samples);
+  const size_t visible_count = MIN(sample_count, 4);
+
+  graphics_context_set_text_color(ctx, GColorBlack);
+  graphics_draw_text(ctx, i18n_get("WEIGHT HISTORY", card),
+                     fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
+                     GRect(0, 2, layer->bounds.size.w, 24), GTextOverflowModeTrailingEllipsis,
+                     GTextAlignmentCenter, NULL);
+
+  if (visible_count == 0) {
+    graphics_draw_text(ctx, i18n_get("No weigh-ins yet", card),
+                       fonts_get_system_font(FONT_KEY_GOTHIC_18),
+                       GRect(10, 72, layer->bounds.size.w - 20, 28),
+                       GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+    return;
+  }
+
+  uint16_t min_weight = samples[0].weight_dag;
+  uint16_t max_weight = samples[0].weight_dag;
+  for (size_t i = 1; i < visible_count; i++) {
+    min_weight = MIN(min_weight, samples[i].weight_dag);
+    max_weight = MAX(max_weight, samples[i].weight_dag);
+  }
+  const uint16_t padding = MAX((max_weight - min_weight) / 4, 1);
+  const int32_t scale_min = min_weight - padding;
+  const int32_t scale_max = max_weight + padding;
+
+  for (size_t i = 0; i < visible_count; i++) {
+    char weight[24];
+    char date[12];
+    char time[12];
+    char label[56];
+    prv_format_weight_with_unit(weight, sizeof(weight), samples[i].weight_dag, card);
+    clock_get_date(date, sizeof(date), samples[i].utc_sec);
+    clock_copy_time_string_timestamp(time, sizeof(time), samples[i].utc_sec);
+    snprintf(label, sizeof(label), "%s  %s, %s", weight, date, time);
+
+    const int16_t row_y = 28 + i * 42;
+    graphics_draw_text(ctx, label, fonts_get_system_font(FONT_KEY_GOTHIC_18),
+                       GRect(20, row_y, layer->bounds.size.w - 40, 22),
+                       GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+
+    const HealthProgressBarValue progress =
+        prv_weight_progress(samples[i].weight_dag, scale_min, scale_max);
+    const GRect bar_frame = GRect(20, row_y + 23, layer->bounds.size.w - 40, 8);
+    prv_draw_record_progress(ctx, &bar_frame, progress);
+  }
+
+  graphics_draw_text(ctx, i18n_get("SELECT: LOG    HOLD: DELETE", card),
+                     fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
+                     GRect(10, 198, layer->bounds.size.w - 20, 20),
+                     GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+}
+#endif
+
 static void prv_draw_summary(GContext *ctx, Layer *layer, WeightDetailCard *card) {
+#if PBL_RECT && DISP_COLS >= 200
+  prv_draw_record_progress_rows(ctx, layer, card);
+  return;
+#endif
+
   const ActivityWeightSample *samples;
   const size_t sample_count = health_data_weight_get_samples(card->health_data, &samples);
   const uint16_t current_weight =
@@ -276,8 +397,13 @@ static void prv_draw_summary(GContext *ctx, Layer *layer, WeightDetailCard *card
       char period_delta[20];
       prv_format_delta(period_delta, sizeof(period_delta), samples[0].weight_dag,
                        graph_range.oldest_weight_dag, card);
+#if DISP_COLS < 180
+      snprintf(status, sizeof(status), i18n_get("%s / %ud", card), period_delta,
+               (unsigned int)graph_range.period_days);
+#else
       snprintf(status, sizeof(status), i18n_get("%s last  %s / %ud", card), previous_delta,
                period_delta, (unsigned int)graph_range.period_days);
+#endif
     } else {
       snprintf(status, sizeof(status), i18n_get("%s since last", card), previous_delta);
     }
@@ -300,19 +426,23 @@ static void prv_draw_summary(GContext *ctx, Layer *layer, WeightDetailCard *card
              (unsigned int)graph_range.period_days);
     const GRect period_frame =
         GRect(graph_frame.origin.x, grect_get_max_y(&graph_frame) - 1, 30, 16);
-    graphics_draw_text(ctx, period,
-                       fonts_get_system_font(FONT_KEY_GOTHIC_14), period_frame,
+    graphics_draw_text(ctx, period, fonts_get_system_font(FONT_KEY_GOTHIC_14), period_frame,
                        GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
     const GRect now_frame =
         GRect(grect_get_max_x(&graph_frame) - 30, period_frame.origin.y, 30, 16);
-    graphics_draw_text(ctx, i18n_get("NOW", card),
-                       fonts_get_system_font(FONT_KEY_GOTHIC_14), now_frame,
-                       GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+    graphics_draw_text(ctx, i18n_get("NOW", card), fonts_get_system_font(FONT_KEY_GOTHIC_14),
+                       now_frame, GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
   }
 
   const int16_t hint_y = SUMMARY_ROW_HEIGHT - PBL_IF_ROUND_ELSE(30, 24);
   GFont hint_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
   if (sample_count > 1) {
+#if DISP_COLS < 180
+    frame.origin.y = hint_y;
+    frame.size.h = 22;
+    graphics_draw_text(ctx, i18n_get("LOG / HOLD DELETE", card), hint_font, frame,
+                       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+#else
     const int16_t inset = PBL_IF_ROUND_ELSE(24, 10);
     const int16_t half_width = (layer->bounds.size.w - 2 * inset) / 2;
     GRect select_frame = GRect(inset, hint_y, half_width, 22);
@@ -321,6 +451,7 @@ static void prv_draw_summary(GContext *ctx, Layer *layer, WeightDetailCard *card
     GRect delete_frame = GRect(inset + half_width, hint_y, half_width, 22);
     graphics_draw_text(ctx, i18n_get("HOLD: DELETE", card), hint_font, delete_frame,
                        GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, NULL);
+#endif
   } else {
     frame.origin.y = hint_y;
     frame.size.h = 22;
@@ -465,6 +596,33 @@ Window *health_weight_detail_card_create(HealthData *health_data) {
   scroll_layer_set_click_config_onto_window(&card->scroll_layer, &card->window);
   scroll_layer_set_shadow_hidden(&card->scroll_layer, true);
   layer_add_child(&card->window.layer, scroll_layer_get_layer(&card->scroll_layer));
+
+#if PBL_ROUND
+  const int16_t indicator_height = 15;
+  const GRect down_frame =
+      grect_inset(card->window.layer.bounds,
+                  GEdgeInsets(card->window.layer.bounds.size.h - indicator_height, 0, 0));
+  layer_init(&card->down_arrow_layer, &down_frame);
+  layer_add_child(&card->window.layer, &card->down_arrow_layer);
+
+  const GRect up_frame =
+      grect_inset(card->window.layer.bounds,
+                  GEdgeInsets(0, 0, card->window.layer.bounds.size.h - indicator_height));
+  layer_init(&card->up_arrow_layer, &up_frame);
+  layer_add_child(&card->window.layer, &card->up_arrow_layer);
+
+  ContentIndicator *indicator = scroll_layer_get_content_indicator(&card->scroll_layer);
+  ContentIndicatorConfig indicator_config = {
+    .layer = &card->up_arrow_layer,
+    .colors.foreground = GColorBlack,
+    .colors.background = GColorWhite,
+  };
+  content_indicator_configure_direction(indicator, ContentIndicatorDirectionUp,
+                                        &indicator_config);
+  indicator_config.layer = &card->down_arrow_layer;
+  content_indicator_configure_direction(indicator, ContentIndicatorDirectionDown,
+                                        &indicator_config);
+#endif
 
   card->content_layer =
       layer_create_with_data(GRectZero, sizeof(WeightDetailCard *));
