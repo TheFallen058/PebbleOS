@@ -2681,6 +2681,11 @@
       "type": "pdc",
       "name": "WEATHER_REPORT_PAPER",
       "file": "normal/base/images/Pebble_80x80_Weather_report.svg"
+    },
+    {
+      "type": "png",
+      "name": "MENU_LAYER_GENERIC_FOLDER_ICON",
+      "file": "normal/base/images/generic_folder_icon.png"
     }
   ],
   "timeline": [
