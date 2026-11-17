@@ -9,6 +9,7 @@
 #include <pbl/kernel/types.h>
 #include <pbl/services/hrm/hrm_manager.h>
 #include <pbl/services/hrm/hrm_manager_private.h>
+#include <pbl/util/math.h>
 #include <pbl/util/size.h>
 #include <pbl/util/testing.h>
 #include <pbl/util/units.h>
@@ -1213,6 +1214,165 @@ void test_hrm_manager__live_off_wrist_subscription_keeps_sensor_on(void) {
     fake_sys_work_callbacks_invoke_pending();
   }
   cl_assert_equal_b(hrm_is_enabled(HRM), true);
+  sys_hrm_manager_unsubscribe(session_ref);
+}
+
+static const HRMData s_off_wrist_data = {
+  .features = HRMFeature_BPM,
+  .off_wrist = true,
+};
+
+static HRMSessionRef prv_subscribe_background_live_hr(void) {
+  stub_pebble_tasks_set_current(PebbleTask_SysWorkq);
+  HRMSessionRef session_ref = hrm_manager_subscribe_with_callback(
+      INSTALL_ID_INVALID, 1, 0, HRMFeature_BPM, false /*low_latency*/, prv_fake_hrm_1_cb, nullptr);
+  fake_sys_work_callbacks_invoke_pending();
+  cl_assert(hrm_is_enabled(HRM));
+  return session_ref;
+}
+
+// Report off-wrist long enough to confirm it
+static void prv_confirm_off_wrist(void) {
+  hrm_manager_new_data_cb(&s_off_wrist_data);
+  prv_advance_time_ms(HRM_OFF_WRIST_CONFIRM_SEC * PBL_MSEC_PER_SEC);
+  hrm_manager_new_data_cb(&s_off_wrist_data);
+  fake_sys_work_callbacks_invoke_pending();
+}
+
+static void prv_fire_update_timer(void) {
+  prv_advance_time_ms(fake_work_timeout_ms(prv_get_timer()));
+  fake_work_fire(prv_get_timer());
+  fake_sys_work_callbacks_invoke_pending();
+}
+
+void test_hrm_manager__off_wrist_pauses_background_live_hr(void) {
+  HRMSessionRef session_ref = prv_subscribe_background_live_hr();
+
+  prv_confirm_off_wrist();
+  cl_assert(!hrm_is_enabled(HRM));
+  cl_assert_equal_i(fake_work_timeout_ms(prv_get_timer()),
+                    HRM_OFF_WRIST_BACKOFF_MIN_SEC * PBL_MSEC_PER_SEC);
+
+  prv_fire_update_timer();
+  cl_assert(hrm_is_enabled(HRM));
+
+  sys_hrm_manager_unsubscribe(session_ref);
+}
+
+void test_hrm_manager__brief_off_wrist_keeps_sampling(void) {
+  HRMSessionRef session_ref = prv_subscribe_background_live_hr();
+
+  hrm_manager_new_data_cb(&s_off_wrist_data);
+  prv_advance_time_ms((HRM_OFF_WRIST_CONFIRM_SEC - 1) * PBL_MSEC_PER_SEC);
+  prv_fake_send_new_data();
+  prv_advance_time_ms(2 * PBL_MSEC_PER_SEC);
+  for (int i = 0; i <= HRM_CHECK_SENSOR_DISABLE_COUNT; ++i) {
+    hrm_manager_new_data_cb(&s_off_wrist_data);
+    fake_sys_work_callbacks_invoke_pending();
+  }
+  cl_assert(hrm_is_enabled(HRM));
+
+  sys_hrm_manager_unsubscribe(session_ref);
+}
+
+void test_hrm_manager__off_wrist_backoff_doubles_up_to_max(void) {
+  HRMSessionRef session_ref = prv_subscribe_background_live_hr();
+
+  uint32_t expected_sec = HRM_OFF_WRIST_BACKOFF_MIN_SEC;
+  for (int i = 0; i < 6; ++i) {
+    prv_confirm_off_wrist();
+    cl_assert(!hrm_is_enabled(HRM));
+    cl_assert_equal_i(fake_work_timeout_ms(prv_get_timer()), expected_sec * PBL_MSEC_PER_SEC);
+    prv_fire_update_timer();
+    cl_assert(hrm_is_enabled(HRM));
+    expected_sec = PBL_MIN(expected_sec * 2, HRM_OFF_WRIST_BACKOFF_MAX_SEC);
+  }
+  cl_assert_equal_i(expected_sec, HRM_OFF_WRIST_BACKOFF_MAX_SEC);
+
+  sys_hrm_manager_unsubscribe(session_ref);
+}
+
+void test_hrm_manager__on_wrist_resets_off_wrist_backoff(void) {
+  HRMSessionRef session_ref = prv_subscribe_background_live_hr();
+
+  prv_confirm_off_wrist();
+  prv_fire_update_timer();
+  prv_fake_send_new_data();
+
+  prv_confirm_off_wrist();
+  cl_assert(!hrm_is_enabled(HRM));
+  cl_assert_equal_i(fake_work_timeout_ms(prv_get_timer()),
+                    HRM_OFF_WRIST_BACKOFF_MIN_SEC * PBL_MSEC_PER_SEC);
+
+  sys_hrm_manager_unsubscribe(session_ref);
+}
+
+void test_hrm_manager__wearer_moved_ends_off_wrist_backoff(void) {
+  HRMSessionRef session_ref = prv_subscribe_background_live_hr();
+
+  prv_confirm_off_wrist();
+  cl_assert(!hrm_is_enabled(HRM));
+
+  hrm_manager_handle_wearer_moved();
+  fake_sys_work_callbacks_invoke_pending();
+  cl_assert(hrm_is_enabled(HRM));
+
+  // The doubling is kept, so a false wake backs off longer next time
+  prv_confirm_off_wrist();
+  cl_assert(!hrm_is_enabled(HRM));
+  cl_assert_equal_i(fake_work_timeout_ms(prv_get_timer()),
+                    2 * HRM_OFF_WRIST_BACKOFF_MIN_SEC * PBL_MSEC_PER_SEC);
+
+  sys_hrm_manager_unsubscribe(session_ref);
+}
+
+void test_hrm_manager__off_wrist_backoff_spares_apps(void) {
+  HRMSessionRef app_ref = sys_hrm_manager_app_subscribe(1, 1, 0, HRMFeature_BPM);
+  HRMSessionRef background_ref = prv_subscribe_background_live_hr();
+
+  prv_confirm_off_wrist();
+  cl_assert(hrm_is_enabled(HRM));
+  cl_assert(!prv_get_subscriber_state_from_ref(background_ref)->is_due);
+
+  sys_hrm_manager_unsubscribe(background_ref);
+  stub_pebble_tasks_set_current(PebbleTask_App);
+  sys_hrm_manager_unsubscribe(app_ref);
+}
+
+void test_hrm_manager__on_wrist_during_app_sampling_ends_backoff(void) {
+  HRMSessionRef app_ref = sys_hrm_manager_app_subscribe(1, 1, 0, HRMFeature_BPM);
+  HRMSessionRef background_ref = prv_subscribe_background_live_hr();
+
+  prv_confirm_off_wrist();
+  cl_assert(!prv_get_subscriber_state_from_ref(background_ref)->is_due);
+
+  prv_fake_send_new_data();
+  fake_sys_work_callbacks_invoke_pending();
+  cl_assert(prv_get_subscriber_state_from_ref(background_ref)->is_due);
+
+  sys_hrm_manager_unsubscribe(background_ref);
+  stub_pebble_tasks_set_current(PebbleTask_App);
+  sys_hrm_manager_unsubscribe(app_ref);
+}
+
+void test_hrm_manager__unplugging_ends_off_wrist_backoff(void) {
+  fake_event_set_callback(prv_charger_event_cb);
+  HRMSessionRef session_ref = prv_subscribe_background_live_hr();
+
+  prv_confirm_off_wrist();
+  cl_assert(!hrm_is_enabled(HRM));
+
+  // A battery update without unplugging keeps the backoff
+  prv_put_battery_state_change_event(false /* is plugged in */);
+  fake_sys_work_callbacks_invoke_pending();
+  cl_assert(!hrm_is_enabled(HRM));
+
+  prv_put_battery_state_change_event(true /* is plugged in */);
+  fake_sys_work_callbacks_invoke_pending();
+  prv_put_battery_state_change_event(false /* is plugged in */);
+  fake_sys_work_callbacks_invoke_pending();
+  cl_assert(hrm_is_enabled(HRM));
+
   sys_hrm_manager_unsubscribe(session_ref);
 }
 

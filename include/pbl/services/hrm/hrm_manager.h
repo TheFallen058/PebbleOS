@@ -141,6 +141,13 @@ void hrm_manager_init(void);
 void hrm_manager_handle_prefs_changed(void);
 
 /**
+ * @brief End the off-wrist backoff early because the wearer moved (steps or a new orientation).
+ *
+ * The next backoff keeps its doubled length, so a false wake costs one short confirmation.
+ */
+void hrm_manager_handle_wearer_moved(void);
+
+/**
  * @brief Check whether a live subscriber keeps the green optical path on continuously.
  *
  * That is, a BPM or HRV subscriber with an interval within @ref HRM_SENSOR_SPIN_UP_SEC (live

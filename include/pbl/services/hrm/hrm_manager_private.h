@@ -127,6 +127,20 @@ typedef struct HRMSubscriberState {
  */
 #define HRM_MAX_UNSERVED_TIME_SEC 120
 
+/**
+ * @brief Continuous off-wrist sensor time after which background subscribers back off, in
+ * seconds.
+ *
+ * Gives the wear detection time to confirm wear again after a sensor restart.
+ */
+#define HRM_OFF_WRIST_CONFIRM_SEC 20
+
+/** @brief First off-wrist backoff, in seconds. Doubles on every confirmation. */
+#define HRM_OFF_WRIST_BACKOFF_MIN_SEC 60
+
+/** @brief Longest off-wrist backoff, in seconds. */
+#define HRM_OFF_WRIST_BACKOFF_MAX_SEC (10 * 60)
+
 /** @brief HRM manager state. */
 struct HRMManagerState {
   /** Lock protecting the state. */
@@ -174,6 +188,13 @@ struct HRMManagerState {
   uint64_t sensor_on_since_ticks;
   /** The unserved timeout warning was logged during this on-time. */
   bool unserved_timeout_logged;
+
+  /** Tick count of the first report of the current off-wrist run; 0 if none. */
+  uint64_t off_wrist_since_ticks;
+  /** Background subscribers are paused until this tick count. */
+  uint64_t off_wrist_backoff_until_ticks;
+  /** Duration of the next off-wrist backoff, in seconds. */
+  uint32_t off_wrist_backoff_sec;
 
   /** The run level allows the sensor. */
   bool enabled_run_level;

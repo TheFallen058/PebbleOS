@@ -246,6 +246,52 @@ static HRMFeature prv_subscriber_allowed_features(const HRMSubscriberState *stat
   return state->features & prefs_allowed;
 }
 
+// System readers (activity HR and SpO2, walk/run HR) sample with nobody watching, so they pause
+// while the watch is off-wrist. Apps, including the workout app, keep sampling.
+static bool prv_pauses_off_wrist(const HRMSubscriberState *state) {
+  return state->task == PebbleTask_SysWorkq;
+}
+
+static void prv_reset_off_wrist_backoff(void) {
+  s_manager_state.off_wrist_since_ticks = 0;
+  s_manager_state.off_wrist_backoff_until_ticks = 0;
+  s_manager_state.off_wrist_backoff_sec = HRM_OFF_WRIST_BACKOFF_MIN_SEC;
+}
+
+// Track the green path wear verdict. Returns true when a backoff starts or ends.
+// The red/IR (SpO2) path has no wear detection and always reports worn, so it is ignored.
+// Must hold s_manager_state.lock.
+static bool prv_track_off_wrist(const HRMData *data, uint64_t cur_ticks) {
+  if (!(data->features & (HRMFeature_BPM | HRMFeature_HRV)) || (data->features & HRMFeature_SpO2)) {
+    return false;
+  }
+  if (!data->off_wrist) {
+    // Seen while an app keeps the sensor on during a backoff
+    const bool was_paused = cur_ticks < s_manager_state.off_wrist_backoff_until_ticks;
+    prv_reset_off_wrist_backoff();
+    return was_paused;
+  }
+  if (cur_ticks < s_manager_state.off_wrist_backoff_until_ticks) {
+    return false;
+  }
+  if (s_manager_state.off_wrist_since_ticks == 0) {
+    s_manager_state.off_wrist_since_ticks = cur_ticks;
+    return false;
+  }
+  if ((cur_ticks - s_manager_state.off_wrist_since_ticks) <
+      pbl_ms_to_ticks(HRM_OFF_WRIST_CONFIRM_SEC * PBL_MSEC_PER_SEC)) {
+    return false;
+  }
+
+  const uint32_t backoff_sec = s_manager_state.off_wrist_backoff_sec;
+  PBL_LOG_DBG("Off wrist, pausing background HR sampling for %" PRIu32 "s", backoff_sec);
+  s_manager_state.off_wrist_backoff_until_ticks =
+      cur_ticks + pbl_ms_to_ticks(backoff_sec * PBL_MSEC_PER_SEC);
+  s_manager_state.off_wrist_backoff_sec = PBL_MIN(backoff_sec * 2, HRM_OFF_WRIST_BACKOFF_MAX_SEC);
+  s_manager_state.off_wrist_since_ticks = 0;
+  return true;
+}
+
 #ifndef CONFIG_MFG
 // The GH3X2X lights one optical path at a time: SpO2 uses the red/IR LEDs, BPM/HRV use the green
 // LED. Returns true if this feature set maps to the red/IR (SpO2) path.
@@ -324,6 +370,7 @@ static bool prv_sensor_enable(HRMFeature features, bool low_latency) {
   s_manager_state.enabled_features = features;
   s_manager_state.sensor_on_since_ticks = pbl_uptime_ticks();
   s_manager_state.unserved_timeout_logged = false;
+  s_manager_state.off_wrist_since_ticks = 0;
   // Re-apply the current activity scene so a sensor power-cycle never drops back to the default
   // (least motion-tolerant) HR model while an activity is in progress.
   hrm_set_activity_scene(HRM, s_manager_state.activity_scene);
@@ -391,6 +438,7 @@ static void prv_update_hrm_enable_system_cb(void *unused) {
     if (prv_can_turn_sensor_on()) {
       const bool sensor_on = hrm_is_enabled(HRM);
       const HRMFeature prefs_allowed = prv_prefs_allowed_features();
+      const bool off_wrist_backoff = cur_ticks < s_manager_state.off_wrist_backoff_until_ticks;
 
       // Loop through each of the subscribers and figure out when the next one needs an update
       HRMSubscriberState *state = (HRMSubscriberState *)s_manager_state.subscribers;
@@ -404,6 +452,13 @@ static void prv_update_hrm_enable_system_cb(void *unused) {
           next_check_ticks =
               PBL_MIN(next_check_ticks,
                       (int64_t)pbl_ms_to_ticks((state->expire_utc - utc_now) * PBL_MSEC_PER_SEC));
+        }
+        if (off_wrist_backoff && prv_pauses_off_wrist(state)) {
+          state->is_due = false;
+          next_check_ticks =
+              PBL_MIN(next_check_ticks,
+                      (int64_t)(s_manager_state.off_wrist_backoff_until_ticks - cur_ticks));
+          continue;
         }
         const HRMFeature sub_features = prv_subscriber_allowed_features(state, prefs_allowed);
         if (sub_features == 0) {
@@ -675,6 +730,10 @@ PBL_T_STATIC void prv_charger_event_cb(PebbleEvent *e, void *context) {
   const PebbleBatteryStateChangeEvent *evt = &e->battery_state;
   pbl_mutex_lock(&s_manager_state.lock, PBL_FOREVER);
   {
+    if (!s_manager_state.enabled_charging_state && !evt->new_state.is_plugged) {
+      // Taken off the charger, likely to be put on: sample right away.
+      prv_reset_off_wrist_backoff();
+    }
     s_manager_state.enabled_charging_state = !evt->new_state.is_plugged;
   }
   pbl_mutex_unlock(&s_manager_state.lock);
@@ -724,6 +783,10 @@ void hrm_manager_new_data_cb(const HRMData *data) {
   time_t utc_now = pbl_realtime();
   uint64_t cur_ticks = pbl_uptime_ticks();
   HRMFeature kernel_bg_features_sent = 0;
+
+  if (prv_track_off_wrist(data, cur_ticks)) {
+    update = true;
+  }
 
   HRMSubscriberState *state = (HRMSubscriberState *)s_manager_state.subscribers;
   while (state) {
@@ -813,6 +876,18 @@ void hrm_manager_handle_prefs_changed(void) {
   pbl_sys_work_call(prv_update_hrm_enable_system_cb, nullptr);
 }
 
+void hrm_manager_handle_wearer_moved(void) {
+  pbl_mutex_lock(&s_manager_state.lock, PBL_FOREVER);
+  const bool paused = pbl_uptime_ticks() < s_manager_state.off_wrist_backoff_until_ticks;
+  s_manager_state.off_wrist_backoff_until_ticks = 0;
+  pbl_mutex_unlock(&s_manager_state.lock);
+
+  if (paused) {
+    PBL_LOG_DBG("Wearer moved, resuming background HR sampling");
+    pbl_sys_work_call(prv_update_hrm_enable_system_cb, nullptr);
+  }
+}
+
 bool hrm_manager_has_continuous_green_subscriber(void) {
   const time_t utc_now = pbl_realtime();
   bool found = false;
@@ -850,6 +925,7 @@ void hrm_manager_init(void) {
       .type = PEBBLE_BATTERY_STATE_CHANGE_EVENT,
       .handler = prv_charger_event_cb,
     },
+    .off_wrist_backoff_sec = HRM_OFF_WRIST_BACKOFF_MIN_SEC,
   };
   pbl_mutex_init(&s_manager_state.lock);
   pbl_mutex_init(&s_manager_state.accel_data_lock);

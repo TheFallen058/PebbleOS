@@ -141,6 +141,9 @@ bool sys_hrm_manager_set_features(HRMSessionRef session, HRMFeature features) {
   return true;
 }
 
+void hrm_manager_handle_wearer_moved(void) {
+}
+
 bool hrm_manager_has_continuous_green_subscriber(void) {
   return false;
 }

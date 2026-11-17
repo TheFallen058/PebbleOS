@@ -740,6 +740,13 @@ static void PBL_NOINLINE prv_process_minute_data(time_t utc_sec) {
   AlgMinuteRecord minute_record = {};
   activity_algorithm_minute_handler(utc_sec, &minute_record);
 
+#ifdef CONFIG_HRM
+  if (minute_record.data.base.steps > 0 ||
+      minute_record.data.base.orientation != s_activity_state.last_orientation) {
+    hrm_manager_handle_wearer_moved();
+  }
+#endif
+
   s_activity_state.last_vmc = minute_record.data.base.vmc;
   s_activity_state.last_minute_steps = minute_record.data.base.steps;
   s_activity_state.last_orientation = minute_record.data.base.orientation;
